@@ -1,0 +1,49 @@
+{
+  "schema": "arm-characterization/v1",
+  "summary": "Layout-aware scientific PDF structure parser (stdlib + poppler-utils only): extracts title, abstract, authors/affiliations, numbered sections with hierarchy, paragraphs, tables (Markdown+rows), figures, display equations, references, repeated headers/footers, and clean per-page plaintext — every element with page+bbox evidence. benchmark.py provides a runnable A/B against a bare raw-text read.",
+  "method": {
+    "parse": "pdftohtml -xml (line-level font/bbox) + pdftotext -layout; column detection, reading-order grouping, section/hierarchy recognition, table/equation/reference extraction.",
+    "front_matter": "authors + affiliations from the page-1 author block; repeated header/footer text from page margins.",
+    "evidence": "every section/paragraph/table/figure/equation/reference carries page + bbox; plaintext_pages keeps inline numbers intact.",
+    "benchmark": "benchmark.py compares a bare raw-text read (0 structured elements) vs the parser (sections+tables+figures+equations+references with 1.0 evidence coverage)."
+  },
+  "validation": {
+    "self_test": {
+      "input": "public sample arXiv:1706.03762 (Attention Is All You Need, 15 pages, 2-column)",
+      "result": "parsed 15 pages; sections incl. Background/Model Architecture/Results/Conclusion with hierarchy; figures/tables/captions located with bboxes; references extracted; full text 36KB",
+      "notes": "self-test uses a public paper, not the hidden fixed cases; the platform supplies actual cases at evaluation time."
+    }
+  },
+  "deviations_from_paper": [
+    "Vector/path-only figures are recorded as image regions by bbox but their interior content is not rasterized into text (out of scope).",
+    "Rotation and non-Latin CJK glyph shaping depend on poppler output and are flagged when uncertain."
+  ],
+  "failure_modes": [
+    {
+      "case": "encrypted PDF",
+      "handling": "fall back to pdftotext; if that fails, report uncertainty and return partial structure"
+    },
+    {
+      "case": "scanned/image PDF with no text layer",
+      "handling": "report 'no text layer' in uncertainty; do not fabricate text"
+    },
+    {
+      "case": "merged multi-font spec across pages",
+      "handling": "global fontspec map keyed by font id"
+    }
+  ],
+  "expected_outputs": [
+    {
+      "path": "outputs/SKILL.md",
+      "note": "top-level skill entry (required)"
+    },
+    {
+      "path": "outputs/parse_pdf.py",
+      "note": "deterministic parser, referenced by SKILL.md"
+    },
+    {
+      "path": "outputs/example/structure-attention.json + attention-fulltext.txt",
+      "note": "text-form self-test example on a public paper (marked as example)"
+    }
+  ]
+}
