@@ -1,0 +1,30 @@
+{
+  "schema": "paper2arm/ppt-benchmark/v1",
+  "input": {
+    "paper": "attention.pdf",
+    "max_slides": 14
+  },
+  "baseline_naive_paragraph_paste": {
+    "n_slides": 14,
+    "within_limit": true,
+    "evidence_coverage": 0.0,
+    "figure_coverage": 0.0,
+    "notes_coverage": 0.0,
+    "main_line_order": 0.0,
+    "overflow_risk_mean_chars": 325.0
+  },
+  "skill_paper_to_ppt": {
+    "n_slides": 12,
+    "within_limit": true,
+    "evidence_coverage": 1.0,
+    "figure_coverage": 1.0,
+    "notes_coverage": 1.0,
+    "main_line_order": 1.0,
+    "overflow_risk_mean_chars": 137.2
+  },
+  "efficiency": {
+    "skill_draft_seconds": 0.09,
+    "note": "Deterministic parse+draft wall-clock for this paper; build/render (figure crops + PPTX + PDF/PNG) is extra."
+  },
+  "note": "Same paper, same tools, same slide limit. Reproduce with 'python3 benchmark.py <paper.pdf> --out DIR --max-slides N'."
+}

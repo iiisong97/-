@@ -1,0 +1,36 @@
+{
+  "schema": "arm-characterization/v1",
+  "summary": "Paper-to-academic-PPT Skill (v4): a deterministic, evidence-backed pipeline that extracts a paper's problem→background→method→results→conclusion main line with clean claim sentences (inline numbers intact, via per-section plaintext chunking), attaches each figure/table to the slide that cites it, crops and embeds the real figure/table images, labels schematic vs data and 本文 vs 基线, honours a template's size and placeholder layout, and emits an editable PPTX with speaker notes, a page-level golden standard, a reproducible A/B benchmark, and rendered PDF/PNG previews.",
+  "method": {
+    "evidence_base": "parse_pdf.py (poppler) gives each figure/table a number, type (schematic/data/table), page, image region, citation cross-references (cited_in/cited_pages) and result_role (comparison_own_vs_baseline); also merges caption-less table bodies and exposes plaintext_pages.",
+    "main_line": "draft_outline.py assigns roles hierarchy-aware (subsections inherit their top-level section), groups subsections into one slide per main section, extracts clean claim sentences from per-section plaintext chunks (heading-boundary, inline numbers intact), attaches figures/tables to their citing slide, filters author blocks / run-in labels / table headers / table-like sections, and re-orders into problem→background→method→results→conclusion.",
+    "build": "build_ppt.py (python-pptx) crops each figure/table region from the PDF via pdftoppm and embeds it (aspect ratio preserved), detects placeholders by type, honours a template's slide size and layout order, shrinks fonts on dense slides, and emits deck.pptx + evidence_map.json (with embed status) + golden_standard.json (per-page claim/evidence/checks).",
+    "render_check": "LibreOffice (soffice) -> PDF, pdftoppm -> per-slide PNG previews; render.log records crop/embed/render failures.",
+    "gain_verification": "benchmark.py builds a naive paragraph-paste baseline on the same paper and compares evidence/figure/notes coverage, main-line order and overflow risk."
+  },
+  "validation": {
+    "self_test": {
+      "input": "public samples arXiv:1706.03762 (Attention Is All You Need, 2-col) and arXiv:2101.00027 (The Pile, 1-col)",
+      "result": "attention -> 12 slides, 5 figures + 4 tables embedded, clean main line; the Pile -> 12 slides, 6 figures + 6 tables embedded",
+      "notes": "self-test uses public papers, not the hidden fixed cases; the platform supplies the actual cases and template at evaluation time. deck.pptx/PDF/PNG/figures are generated at runtime and are NOT pre-submitted (binary files are not accepted as Skill resources)."
+    }
+  },
+  "deviations_from_paper": [
+    "Does not redraw figures or beautify graphics (out of scope).",
+    "Inline math is split from sentences by the layout parse; plaintext_pages is provided so the agent re-merges exact numbers during refinement (the deterministic draft is a skeleton).",
+    "Image-only figures are cropped as an image; if a crop fails the slide keeps the caption + page reference and reports it."
+  ],
+  "failure_modes": [
+    {"case": "encrypted PDF", "handling": "parse step fails; reported, not guessed"},
+    {"case": "missing template", "handling": "falls back to default python-pptx layout; placeholders detected by type"},
+    {"case": "LibreOffice unavailable", "handling": "preview gap recorded in render.log/uncertainty"},
+    {"case": "figure crop fails", "handling": "evidence_map.json marks embedded=false with reason; caption+page kept"},
+    {"case": "slide-count overflow", "handling": "draft respects --max-slides and reserves the conclusion; agent splits or drops"},
+    {"case": "bold table-header misread as heading", "handling": "draft filters common cases; agent drops any remaining spurious slides"}
+  ],
+  "expected_outputs": [
+    {"path": "outputs/SKILL.md", "note": "top-level skill entry (required)"},
+    {"path": "outputs/parse_pdf.py + draft_outline.py + build_ppt.py + reproduce.py + benchmark.py", "note": "deterministic pipeline, referenced by SKILL.md"},
+    {"path": "outputs/example/deck_spec.json + evidence_map.json + golden_standard.json + benchmark.json", "note": "text-form self-test example on a public paper (marked as example)"}
+  ]
+}

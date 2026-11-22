@@ -1,0 +1,690 @@
+{
+  "schema": "paper2arm/deck-spec/v1",
+  "meta": {
+    "paper_pdf": "testdata/attention.pdf",
+    "audience": "lab meeting",
+    "duration_min": 15,
+    "max_slides": 14
+  },
+  "slides": [
+    {
+      "layout": "title",
+      "title": "Attention Is All You Need",
+      "subtitle": "lab meeting · 15 min · 主线：The dominant sequence transduction models are based on complex recurrent or convolutional neural networks that include an encoder and a decoder.",
+      "bullets": [
+        [
+          "The dominant sequence transduction models are based on complex recurrent or convolutional neural networks that include an encoder and a decoder.",
+          0
+        ]
+      ],
+      "notes": "开场：用一句话说出这篇论文回答的问题与结论，不要读标题；随后预告主线：问题 → 方法 → 证据 → 结论。",
+      "evidence": [
+        {
+          "type": "abstract",
+          "ref": "Abstract",
+          "page": 1,
+          "quote": "The dominant sequence transduction models are based on complex recurrent or convolutional neural networks that include an encoder and a decoder. The best performing models also connect the encoder …"
+        }
+      ],
+      "sections": []
+    },
+    {
+      "layout": "content",
+      "title": "问题与动机",
+      "bullets": [
+        [
+          "研究问题：The dominant sequence transduction models are based on complex recurrent or convolutional neural networks that include an encoder and a decoder. The best performing models also connect the encoder and decoder through an attention mechanism. We propose a new …",
+          0
+        ]
+      ],
+      "notes": "讲清 gap：已有方法差在哪，本文为什么现在做；若摘要不足以支撑，请回读引言补足。",
+      "evidence": [
+        {
+          "type": "section",
+          "ref": "Abstract",
+          "page": 1,
+          "quote": "The dominant sequence transduction models are based on complex recurrent or convolutional neural networks that include an encoder and a decoder. The best …"
+        }
+      ],
+      "sections": []
+    },
+    {
+      "layout": "content",
+      "title": "Introduction",
+      "bullets": [
+        [
+          "Recurrent neural networks, long short-term memory [13] and gated recurrent [7] neural networks in particular, have been firmly established as state of the art approaches in …",
+          1
+        ],
+        [
+          "Numerous efforts have since continued to push the boundaries of recurrent language models and encoder-decoder architectures [38, 24, 15].",
+          1
+        ],
+        [
+          "Recurrent models typically factor computation along the symbol positions of the input and output sequences.",
+          1
+        ],
+        [
+          "Aligning the positions to steps in computation time, they generate a sequence of hidden states ht , as a function of the previous hidden state ht−1 and the input for position t.",
+          1
+        ]
+      ],
+      "figures": [],
+      "notes": "本页对应论文「1 Introduction」（第 2 页起）。讲每一点时指向右侧图/表，不逐字复述；本页只承载一个核心主张。",
+      "evidence": [
+        {
+          "type": "section",
+          "ref": "1 Introduction",
+          "page": 2,
+          "quote": "Recurrent neural networks, long short-term memory in particular, have been firmly established as state of the art …"
+        }
+      ],
+      "sections": [
+        {
+          "heading": "1 Introduction",
+          "page": 2
+        }
+      ]
+    },
+    {
+      "layout": "content",
+      "title": "Background",
+      "bullets": [
+        [
+          "The goal of reducing sequential computation also forms the foundation of the Extended Neural GPU [16], ByteNet [18] and ConvS2S [9], all of which use convolutional neural …",
+          1
+        ],
+        [
+          "In these models, the number of operations required to relate signals from two arbitrary input or output positions grows in the distance between positions, linearly for ConvS2S …",
+          1
+        ],
+        [
+          "This makes it more difficult to learn dependencies between distant positions [12].",
+          1
+        ],
+        [
+          "In the Transformer this is reduced to a constant number of operations, albeit at the cost of reduced effective resolution due to averaging attention-weighted positions, an effect …",
+          1
+        ]
+      ],
+      "figures": [],
+      "notes": "本页对应论文「2 Background」（第 2 页起）。讲每一点时指向右侧图/表，不逐字复述；本页只承载一个核心主张。",
+      "evidence": [
+        {
+          "type": "section",
+          "ref": "2 Background",
+          "page": 2,
+          "quote": "The goal of reducing sequential computation also forms the foundation of the Extended Neural GPU  block, computing …"
+        }
+      ],
+      "sections": [
+        {
+          "heading": "2 Background",
+          "page": 2
+        }
+      ]
+    },
+    {
+      "layout": "content",
+      "title": "Why Self-Attention",
+      "bullets": [
+        [
+          "In this section we compare various aspects of self-attention layers to the recurrent and convolu- tional layers commonly used for mapping one variable-length sequence of symbol …",
+          1
+        ],
+        [
+          "Motivating our use of self-attention we consider three desiderata.",
+          1
+        ],
+        [
+          "One is the total computational complexity per layer.",
+          1
+        ],
+        [
+          "Another is the amount of computation that can be parallelized, as measured by the minimum number of sequential operations required.",
+          1
+        ]
+      ],
+      "figures": [
+        {
+          "kind": "table",
+          "number": 1,
+          "page": 6,
+          "caption": "Table 1: Maximum path lengths, per-layer complexity and minimum number of sequential operations",
+          "type": "table",
+          "region": [
+            160.3,
+            108.0,
+            598.2,
+            13.099999999999994
+          ],
+          "result_role": "supporting_data",
+          "cited_in": [
+            "3.5 Positional Encoding",
+            "4 Why Self-Attention"
+          ],
+          "rows": null,
+          "markdown": ""
+        },
+        {
+          "kind": "table",
+          "number": 3,
+          "page": 9,
+          "caption": "Table 3: Variations on the Transformer architecture. Unlisted values are identical to those of the base model. All metrics are on the English-to-German translation development set, newstest2013. Listed perplexities are per-wordpiece, …",
+          "type": "table",
+          "region": [
+            161.3,
+            108.0,
+            596.5999999999999,
+            87.4
+          ],
+          "result_role": "supporting_data",
+          "cited_in": [
+            "3.5 Positional Encoding",
+            "4 Why Self-Attention",
+            "5 Training",
+            "5.1 Training Data and Batching",
+            "5.2 Hardware and Schedule",
+            "5.3 Optimizer",
+            "5.4 Regularization",
+            "Residual Dropout",
+            "Label Smoothing",
+            "6 Results",
+            "6.1 Machine Translation",
+            "6.2 Model Variations",
+            "6.3 English Constituency Parsing"
+          ],
+          "rows": [
+            [
+              "4.33"
+            ],
+            [
+              "26.4"
+            ]
+          ],
+          "markdown": "| 4.33 |\n| --- |\n| 26.4 |"
+        }
+      ],
+      "notes": "本页对应论文「4 Why Self-Attention」（第 6 页起）。讲每一点时指向右侧图/表，不逐字复述；本页只承载一个核心主张。",
+      "evidence": [
+        {
+          "type": "section",
+          "ref": "4 Why Self-Attention",
+          "page": 6,
+          "quote": "In this section we compare various aspects of self-attention layers to the recurrent and convolu- tional layers …"
+        },
+        {
+          "type": "table",
+          "ref": "Table 1",
+          "page": 6,
+          "quote": "Table 1: Maximum path lengths, per-layer complexity and minimum number of sequential operations",
+          "role": "supporting_data"
+        },
+        {
+          "type": "table",
+          "ref": "Table 3",
+          "page": 9,
+          "quote": "Table 3: Variations on the Transformer architecture. Unlisted values are identical to those of the base model. All metrics are on the English-to-German translation development set, newstest2013. Listed perplexities are per-wordpiece, …",
+          "role": "supporting_data"
+        }
+      ],
+      "sections": [
+        {
+          "heading": "4 Why Self-Attention",
+          "page": 6
+        }
+      ]
+    },
+    {
+      "layout": "content",
+      "title": "Model Architecture",
+      "bullets": [
+        [
+          "Most competitive neural sequence transduction models have an encoder-decoder structure [5, 2, 35].",
+          1
+        ],
+        [
+          "Here, the encoder maps an input sequence of symbol representations (x1 , ..., xn ) to a sequence of continuous representations z = (z1 , ..., zn ).",
+          1
+        ],
+        [
+          "Given z, the decoder then generates an output sequence (y1 , ..., ym ) of symbols one element at a time.",
+          1
+        ],
+        [
+          "At each step the model is auto-regressive [10], consuming the previously generated symbols as additional input when generating the next.",
+          1
+        ]
+      ],
+      "figures": [
+        {
+          "kind": "figure",
+          "number": 1,
+          "page": 3,
+          "caption": "Figure 1: The Transformer - model architecture.",
+          "type": "schematic",
+          "region": [
+            161.5,
+            55,
+            597.0,
+            553.3
+          ],
+          "result_role": null,
+          "cited_in": [
+            "3.1 Encoder and Decoder Stacks",
+            "Encoder:",
+            "Decoder:",
+            "3.2 Attention"
+          ]
+        },
+        {
+          "kind": "figure",
+          "number": 2,
+          "page": 4,
+          "caption": "Figure 2: (left) Scaled Dot-Product Attention. (right) Multi-Head Attention consists of several attention layers running in parallel.",
+          "type": "figure",
+          "region": [
+            161.3,
+            124.4,
+            597.2,
+            288.5
+          ],
+          "result_role": null,
+          "cited_in": [
+            "3.2.1 Scaled Dot-Product Attention",
+            "3.2.2 Multi-Head Attention",
+            "3.2.3 Applications of Attention in our Model",
+            "3.3 Position-wise Feed-Forward Networks",
+            "3.4 Embeddings and Softmax"
+          ]
+        }
+      ],
+      "notes": "本页对应论文「3 Model Architecture」（第 2 页起）。讲每一点时指向右侧图/表，不逐字复述；本页只承载一个核心主张。",
+      "evidence": [
+        {
+          "type": "section",
+          "ref": "3 Model Architecture",
+          "page": 2,
+          "quote": "Most competitive neural sequence transduction models have an encoder-decoder structure Here, the encoder maps an input …"
+        },
+        {
+          "type": "figure",
+          "ref": "Figure 1",
+          "page": 3,
+          "quote": "Figure 1: The Transformer - model architecture.",
+          "role": "schematic"
+        },
+        {
+          "type": "figure",
+          "ref": "Figure 2",
+          "page": 4,
+          "quote": "Figure 2: (left) Scaled Dot-Product Attention. (right) Multi-Head Attention consists of several attention layers running in parallel.",
+          "role": "figure"
+        }
+      ],
+      "sections": [
+        {
+          "heading": "3 Model Architecture",
+          "page": 2
+        },
+        {
+          "heading": "3.2 Attention",
+          "page": 3
+        },
+        {
+          "heading": "3.2.1 Scaled Dot-Product Attention",
+          "page": 4
+        },
+        {
+          "heading": "3.2.2 Multi-Head Attention",
+          "page": 4
+        },
+        {
+          "heading": "3.2.3 Applications of Attention in our Model",
+          "page": 5
+        },
+        {
+          "heading": "3.3 Position-wise Feed-Forward Networks",
+          "page": 5
+        },
+        {
+          "heading": "3.4 Embeddings and Softmax",
+          "page": 5
+        },
+        {
+          "heading": "3.5 Positional Encoding",
+          "page": 6
+        }
+      ]
+    },
+    {
+      "layout": "content",
+      "title": "Training",
+      "bullets": [
+        [
+          "This section describes the training regime for our models.",
+          1
+        ],
+        [
+          "We trained on the standard WMT 2014 English-German dataset consisting of about 4.5 million sentence pairs.",
+          1
+        ],
+        [
+          "Sentences were encoded using byte-pair encoding [3], which has a shared source- target vocabulary of about 37000 tokens.",
+          1
+        ],
+        [
+          "For English-French, we used the significantly larger WMT 2014 English-French dataset consisting of 36M sentences and split tokens into a 32000 word-piece vocabulary [38].",
+          1
+        ]
+      ],
+      "figures": [],
+      "notes": "本页对应论文「5 Training」（第 7 页起）。讲每一点时指向右侧图/表，不逐字复述；本页只承载一个核心主张。",
+      "evidence": [
+        {
+          "type": "section",
+          "ref": "5 Training",
+          "page": 7,
+          "quote": "This section describes the training regime for our models. We trained on the standard WMT 2014 English-German dataset …"
+        }
+      ],
+      "sections": [
+        {
+          "heading": "5 Training",
+          "page": 7
+        },
+        {
+          "heading": "5.1 Training Data and Batching",
+          "page": 7
+        },
+        {
+          "heading": "5.2 Hardware and Schedule",
+          "page": 7
+        },
+        {
+          "heading": "5.3 Optimizer",
+          "page": 7
+        },
+        {
+          "heading": "5.4 Regularization",
+          "page": 7
+        }
+      ]
+    },
+    {
+      "layout": "content",
+      "title": "Machine Translation",
+      "bullets": [
+        [
+          "On the WMT 2014 English-to-German translation task, the big transformer model (Transformer (big) in Table 2) outperforms the best previously reported models (including ensembles) …",
+          1
+        ],
+        [
+          "The configuration of this model is listed in the bottom line of Table 3.",
+          1
+        ],
+        [
+          "Training took 3.5 days on 8 P100 GPUs.",
+          1
+        ],
+        [
+          "Even our base model surpasses all previously published models and ensembles, at a fraction of the training cost of any of the competitive models.",
+          1
+        ],
+        [
+          "⚠️ 对比表：区分「本文结果」与「基线/他人结果」，勿将他人结果当本文",
+          1
+        ]
+      ],
+      "figures": [
+        {
+          "kind": "table",
+          "number": 2,
+          "page": 8,
+          "caption": "Table 2: The Transformer achieves better BLEU scores than previous state-of-the-art models on the English-to-German and English-to-French newstest2014 tests at a fraction of the training cost. BLEU Training Cost (FLOPs) Model EN-DE EN-FR …",
+          "type": "table",
+          "region": [
+            161.5,
+            108.0,
+            596.4,
+            92.4
+          ],
+          "result_role": "comparison_own_vs_baseline",
+          "cited_in": [
+            "Residual Dropout",
+            "Label Smoothing",
+            "6 Results",
+            "6.1 Machine Translation",
+            "6.2 Model Variations"
+          ],
+          "rows": [
+            [
+              "41.29"
+            ],
+            [
+              "28.4"
+            ],
+            [
+              "41.8"
+            ]
+          ],
+          "markdown": "| 41.29 |\n| --- |\n| 28.4 |\n| --- |\n| 41.8 |"
+        }
+      ],
+      "notes": "本页对应论文「6.1 Machine Translation」（第 8 页起）。讲每一点时指向右侧图/表，不逐字复述；本页只承载一个核心主张。",
+      "evidence": [
+        {
+          "type": "section",
+          "ref": "6.1 Machine Translation",
+          "page": 8,
+          "quote": "On the WMT 2014 English-to-German translation task, the big transformer model (Transformer (big) 2 . 0 in Table BLEU, …"
+        },
+        {
+          "type": "table",
+          "ref": "Table 2",
+          "page": 8,
+          "quote": "Table 2: The Transformer achieves better BLEU scores than previous state-of-the-art models on the English-to-German and English-to-French newstest2014 tests at a fraction of the training cost. BLEU Training Cost (FLOPs) Model EN-DE EN-FR …",
+          "role": "comparison_own_vs_baseline"
+        }
+      ],
+      "sections": [
+        {
+          "heading": "6.1 Machine Translation",
+          "page": 8
+        },
+        {
+          "heading": "6.2 Model Variations",
+          "page": 8
+        },
+        {
+          "heading": "6.3 English Constituency Parsing",
+          "page": 9
+        }
+      ]
+    },
+    {
+      "layout": "content",
+      "title": "Conclusion",
+      "bullets": [
+        [
+          "In this work, we presented the Transformer, the first sequence transduction model based entirely on attention, replacing the recurrent layers most commonly used in …",
+          1
+        ],
+        [
+          "For translation tasks, the Transformer can be trained significantly faster than architectures based on recurrent or convolutional layers.",
+          1
+        ],
+        [
+          "On both WMT 2014 English-to-German and WMT 2014 English-to-French translation tasks, we achieve a new state of the art.",
+          1
+        ],
+        [
+          "In the former task our best model outperforms even all previously reported ensembles.",
+          1
+        ]
+      ],
+      "figures": [
+        {
+          "kind": "table",
+          "number": 4,
+          "page": 10,
+          "caption": "Table 4: The Transformer generalizes well to English constituency parsing (Results are on Section 23 of WSJ)",
+          "type": "table",
+          "region": [
+            161.3,
+            108.0,
+            597.2,
+            31.400000000000006
+          ],
+          "result_role": "supporting_data",
+          "cited_in": [
+            "Parser Training WSJ 23 F1",
+            "7 Conclusion",
+            "Acknowledgements",
+            "References"
+          ],
+          "rows": null,
+          "markdown": ""
+        }
+      ],
+      "notes": "本页对应论文「7 Conclusion」（第 10 页起）。讲每一点时指向右侧图/表，不逐字复述；本页只承载一个核心主张。",
+      "evidence": [
+        {
+          "type": "section",
+          "ref": "7 Conclusion",
+          "page": 10,
+          "quote": "In this work, we presented the Transformer, the first sequence transduction model based entirely on attention, …"
+        },
+        {
+          "type": "table",
+          "ref": "Table 4",
+          "page": 10,
+          "quote": "Table 4: The Transformer generalizes well to English constituency parsing (Results are on Section 23 of WSJ)",
+          "role": "supporting_data"
+        }
+      ],
+      "sections": [
+        {
+          "heading": "7 Conclusion",
+          "page": 10
+        }
+      ]
+    },
+    {
+      "layout": "content",
+      "title": "示意图证据（第 13 页）",
+      "bullets": [
+        [
+          "Figure 3: An example of the attention mechanism following long-distance dependencies in the encoder self-attention in layer 5 of 6. Many of the attention heads attend to a distant dependency of the verb ‘making’, completing the phrase …",
+          0
+        ]
+      ],
+      "figures": [
+        {
+          "kind": "figure",
+          "number": 3,
+          "page": 13,
+          "caption": "Figure 3: An example of the attention mechanism following long-distance dependencies in the encoder self-attention in layer 5 of 6. Many of the attention heads attend to a distant dependency of the verb ‘making’, completing the phrase …",
+          "type": "schematic",
+          "region": [
+            162.0,
+            149.8,
+            594.3,
+            320.0
+          ],
+          "result_role": null,
+          "cited_in": [
+            "Attention Visualizations"
+          ]
+        }
+      ],
+      "notes": "本页展示论文图表；先说明横纵轴/条件，再讲结论。",
+      "evidence": [
+        {
+          "type": "figure",
+          "ref": "Figure 3",
+          "page": 13,
+          "quote": "Figure 3: An example of the attention mechanism following long-distance dependencies in the encoder self-attention in layer 5 of 6. Many of the attention heads attend to a distant dependency of the verb ‘making’, completing the phrase …",
+          "role": "schematic"
+        }
+      ],
+      "sections": []
+    },
+    {
+      "layout": "content",
+      "title": "示意图证据（第 14 页）",
+      "bullets": [
+        [
+          "Figure 4: Two attention heads, also in layer 5 of 6, apparently involved in anaphora resolution. Top: Full attentions for head 5. Bottom: Isolated attentions from just the word ‘its’ for attention heads 5 and 6. Note that the attentions …",
+          0
+        ]
+      ],
+      "figures": [
+        {
+          "kind": "figure",
+          "number": 4,
+          "page": 14,
+          "caption": "Figure 4: Two attention heads, also in layer 5 of 6, apparently involved in anaphora resolution. Top: Full attentions for head 5. Bottom: Isolated attentions from just the word ‘its’ for attention heads 5 and 6. Note that the attentions …",
+          "type": "schematic",
+          "region": [
+            162.0,
+            602.6,
+            596.1,
+            320.0
+          ],
+          "result_role": null,
+          "cited_in": []
+        }
+      ],
+      "notes": "本页展示论文图表；先说明横纵轴/条件，再讲结论。",
+      "evidence": [
+        {
+          "type": "figure",
+          "ref": "Figure 4",
+          "page": 14,
+          "quote": "Figure 4: Two attention heads, also in layer 5 of 6, apparently involved in anaphora resolution. Top: Full attentions for head 5. Bottom: Isolated attentions from just the word ‘its’ for attention heads 5 and 6. Note that the attentions …",
+          "role": "schematic"
+        }
+      ],
+      "sections": []
+    },
+    {
+      "layout": "content",
+      "title": "示意图证据（第 15 页）",
+      "bullets": [
+        [
+          "Figure 5: Many of the attention heads exhibit behaviour that seems related to the structure of the sentence. We give two such examples above, from two different heads from the encoder self-attention at layer 5 of 6. The heads clearly …",
+          0
+        ]
+      ],
+      "figures": [
+        {
+          "kind": "figure",
+          "number": 5,
+          "page": 15,
+          "caption": "Figure 5: Many of the attention heads exhibit behaviour that seems related to the structure of the sentence. We give two such examples above, from two different heads from the encoder self-attention at layer 5 of 6. The heads clearly …",
+          "type": "schematic",
+          "region": [
+            162.0,
+            584.8,
+            594.0,
+            320.0
+          ],
+          "result_role": null,
+          "cited_in": []
+        }
+      ],
+      "notes": "本页展示论文图表；先说明横纵轴/条件，再讲结论。",
+      "evidence": [
+        {
+          "type": "figure",
+          "ref": "Figure 5",
+          "page": 15,
+          "quote": "Figure 5: Many of the attention heads exhibit behaviour that seems related to the structure of the sentence. We give two such examples above, from two different heads from the encoder self-attention at layer 5 of 6. The heads clearly …",
+          "role": "schematic"
+        }
+      ],
+      "sections": []
+    }
+  ]
+}
