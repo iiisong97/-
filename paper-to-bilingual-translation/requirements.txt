@@ -1,0 +1,2 @@
+# stdlib only; poppler-utils (pdftotext / pdftohtml) must be present in the
+# runtime image (declared as pdf-text-tool in the challenge resources).
