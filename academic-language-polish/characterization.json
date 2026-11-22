@@ -1,0 +1,35 @@
+{
+  "schema": "arm-characterization/v1",
+  "summary": "Academic language polishing Skill with deterministic preservation guardrails (stdlib only). Rewrites for academic register and concision while preservation_check.py verifies survival of eight meaning-relevant categories: numbers/units, citations, figure/table/equation references, hedging terms, claim-strength verbs (strengthening AND weakening), negation scope, and strict quantifiers; it also flags heavy rewrites via sentence similarity. benchmark.py provides a runnable A/B against a bare LLM.",
+  "method": {
+    "polish": "register, concision, cohesion and terminology unification; hedges kept where the source is itself hedged.",
+    "guardrails": "preservation_check.py extracts protected tokens (NUMBER_UNIT_RE, CITATION_RE, FIG_REF_RE, EQ_REF_RE), hedge markers, strong/weak claim verbs, negation markers and strict quantifiers, then verifies survival in the polished text; computes per-sentence SequenceMatcher ratio (>0.45 else heavy_rewrite flag).",
+    "claim_strength": "detects both directions: strong verb dropped + weak verb added = weakening; weak dropped + strong added = strengthening.",
+    "benchmark": "benchmark.py compares a bare LLM (0 check categories) vs this Skill (8 check categories) on the same deliberately-broken sample; gain is a run result.",
+    "determinism": "no network; the checker is a pure function of original vs polished text."
+  },
+  "validation": {
+    "self_test": {
+      "input": "synthetic example pair (original.txt / polished.txt, deliberately edited with removed hedges and citation [1,2]) plus claim-strength/negation/quantifier unit cases",
+      "result": "preservation_report.json correctly flags removed hedges and citation; claim_strength/negation_lost/quantifiers_dropped each fire on their unit case; a good polish yields no false positives",
+      "notes": "self-test is synthetic and explicitly not a hidden case answer; the platform supplies actual cases at evaluation time."
+    }
+  },
+  "deviations_from_paper": [
+    "Does not change facts, numbers, units, method names or conclusions; only rewrites surface phrasing.",
+    "Hedging strength is preserved: a hedged claim stays hedged, a firm claim stays firm."
+  ],
+  "failure_modes": [
+    {"case": "term variant substitution", "handling": "preservation_check.py warns when a protected token count drops via a variant (term_variant_check with stop set)"},
+    {"case": "claim weakened/strengthened by verb swap", "handling": "claim_strength_check flags strong->weak and weak->strong swaps"},
+    {"case": "negation scope lost", "handling": "negation_check flags source-negates-but-polished-does-not"},
+    {"case": "strict quantifier dropped", "handling": "quantifier_check flags only/at least/at most/all/none dropped"},
+    {"case": "heavy rewrite", "handling": "sentence similarity below 0.45 flags the sentence for human review instead of silently accepting"}
+  ],
+  "expected_outputs": [
+    {"path": "outputs/SKILL.md", "note": "top-level skill entry (required)"},
+    {"path": "outputs/preservation_check.py", "note": "deterministic guardrail, referenced by SKILL.md"},
+    {"path": "outputs/benchmark.py", "note": "A/B gain evidence"},
+    {"path": "outputs/example/original.txt + polished.txt + preservation-report.json", "note": "synthetic self-test example (marked as example)"}
+  ]
+}

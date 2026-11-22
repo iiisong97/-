@@ -1,0 +1,1 @@
+Our method may suggest that the proposed model could improving the accuracy of 12.5% on WMT 2014 [1,2]. Figure 3 show the architecture of model. The melting point was measured at 350 K, and this finding indicate a possible correlation between temperature and yield. To our knowledge, the mechanism remains unclear, and we hypothesis that further study is needed.

@@ -1,0 +1,58 @@
+{
+  "protected": {
+    "numbers_units": [
+      {
+        "token": "12.5%",
+        "preserved": true
+      },
+      {
+        "token": "350 K",
+        "preserved": true
+      }
+    ],
+    "citations": [
+      {
+        "token": "[1,2]",
+        "preserved": true
+      }
+    ],
+    "fig_table_refs": [
+      {
+        "token": "Figure 3",
+        "preserved": true
+      }
+    ],
+    "equation_refs": []
+  },
+  "hedges_missing": [],
+  "sentence_edit": [
+    {
+      "index": 0,
+      "ratio": 0.961,
+      "flag": "ok",
+      "preview": "Our method may suggest that the proposed model could improving the accuracy of 1"
+    },
+    {
+      "index": 1,
+      "ratio": 0.941,
+      "flag": "ok",
+      "preview": "Figure 3 show the architecture of model."
+    },
+    {
+      "index": 2,
+      "ratio": 0.996,
+      "flag": "ok",
+      "preview": "The melting point was measured at 350 K, and this finding indicate a possible co"
+    },
+    {
+      "index": 3,
+      "ratio": 0.984,
+      "flag": "ok",
+      "preview": "To our knowledge, the mechanism remains unclear, and we hypothesis that further "
+    }
+  ],
+  "term_variants": {},
+  "verdicts": [
+    "ok: no protected token loss, no missing hedges, no heavy rewrites"
+  ]
+}
