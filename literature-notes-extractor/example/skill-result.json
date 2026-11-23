@@ -1,0 +1,56 @@
+{
+  "schema": "lit-notes/v1",
+  "case_id": "example-synthetic-0001",
+  "paper_card": {
+    "title": "A Synthetic Study of Fast Alignment (example)",
+    "authors": ["A. Author", "B. Author"],
+    "year": 2025,
+    "venue": "Synthetic Conference",
+    "identifiers": {"doi": "10.0000/example"},
+    "research_question": "How to reduce alignment time without losing accuracy?",
+    "data": "SyntheticBench (1M samples)",
+    "methods": ["the proposed fast-alignment method"],
+    "key_findings": ["reduces alignment time by 40%", "outperforms the baseline at equal parameters"],
+    "conclusions": ["the proposed method is faster and better than the baseline"],
+    "limitations": ["not reported"],
+    "preconditions": ["on SyntheticBench", "at equal parameter count"]
+  },
+  "section_notes": [
+    {
+      "section": "3.2 Fast Alignment Method",
+      "number": "3.2",
+      "level": 2,
+      "page": 5,
+      "purpose": "define the fast-alignment method",
+      "method": "a two-stage alignment procedure",
+      "result": "reduces alignment time by 40%",
+      "conclusion": "the method speeds up alignment",
+      "transition": "follows the baseline description",
+      "anchors": [
+        {"page": 5, "paragraph": 1, "quote": "our method reduces alignment time by 40% on SyntheticBench"}
+      ]
+    }
+  ],
+  "knowledge_points": [
+    {
+      "id": "kp-0123456789abcdef",
+      "term": "Fast Alignment Method",
+      "type": "method",
+      "definition": "a two-stage procedure that reduces alignment time by 40%",
+      "synonyms": ["FAM"],
+      "anchors": [
+        {"page": 5, "quote": "our method reduces alignment time by 40% on SyntheticBench"}
+      ]
+    }
+  ],
+  "status": "success",
+  "sources": [
+    {"page": 5, "quote": "our method reduces alignment time by 40% on SyntheticBench"}
+  ],
+  "uncertainty": [],
+  "change_log": [
+    "built paper_card with seven required fields",
+    "created one section note aligned to the paper's section 3.2",
+    "extracted one knowledge point with a stable id and anchor"
+  ]
+}
