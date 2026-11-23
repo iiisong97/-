@@ -1,0 +1,67 @@
+{
+  "schema": "nanopub/v1",
+  "case_id": "example-synthetic-0001",
+  "paper": {
+    "title": "A Synthetic Method for Fast Alignment (example)",
+    "authors": ["A. Author", "B. Author"],
+    "year": 2025,
+    "venue": "Synthetic Conference",
+    "identifiers": {"doi": "10.0000/example"}
+  },
+  "nanopublications": [
+    {
+      "id": "np-9f3a1c2b8d4e5f60",
+      "assertion": {
+        "text": "The proposed method reduces alignment time by 40%.",
+        "subject": "the proposed method",
+        "predicate": "reduces",
+        "object": "alignment time by 40%"
+      },
+      "condition": "on the synthetic benchmark",
+      "evidence": {
+        "quote": "our method reduces alignment time by 40% on the synthetic benchmark",
+        "location": {"page": 5, "section": "Results", "bbox": [100, 200, 500, 260]}
+      },
+      "confidence": {"level": "direct", "basis": "the quote states the claim verbatim"},
+      "provenance": {
+        "paper_title": "A Synthetic Method for Fast Alignment (example)",
+        "authors": ["A. Author", "B. Author"],
+        "year": 2025,
+        "version": "v1",
+        "identifiers": {"doi": "10.0000/example"}
+      }
+    },
+    {
+      "id": "np-1b2c3d4e5f607182",
+      "assertion": {
+        "text": "The proposed method outperforms the baseline.",
+        "subject": "the proposed method",
+        "predicate": "outperforms",
+        "object": "the baseline"
+      },
+      "condition": "at equal parameter count",
+      "evidence": {
+        "quote": "at equal parameter count, our method outperforms the baseline",
+        "location": {"page": 6, "section": "Results", "bbox": [100, 300, 500, 360]}
+      },
+      "confidence": {"level": "direct", "basis": "the quote states the comparison and direction"},
+      "provenance": {
+        "paper_title": "A Synthetic Method for Fast Alignment (example)",
+        "authors": ["A. Author", "B. Author"],
+        "year": 2025,
+        "version": "v1",
+        "identifiers": {"doi": "10.0000/example"}
+      }
+    }
+  ],
+  "status": "success",
+  "sources": [
+    {"page": 5, "quote": "our method reduces alignment time by 40% on the synthetic benchmark"},
+    {"page": 6, "quote": "at equal parameter count, our method outperforms the baseline"}
+  ],
+  "uncertainty": [],
+  "change_log": [
+    "split the Results paragraph into two atomic assertions",
+    "bound each assertion to its minimal supporting quote with page/bbox"
+  ]
+}

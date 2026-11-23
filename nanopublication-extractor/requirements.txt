@@ -1,0 +1,3 @@
+# nanopublication-extractor
+# stdlib-only (no pip packages). Requires poppler-utils (pdftotext, pdftohtml),
+# which are preinstalled in the evaluation image.
