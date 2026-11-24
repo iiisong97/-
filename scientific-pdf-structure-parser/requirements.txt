@@ -1,1 +1,4 @@
-# Python 3.8+ standard library only; poppler-utils (pdftohtml/pdftotext) preinstalled.
+# Python 3 stdlib only (no pip dependencies).
+# System tool required: pdftotext (poppler-utils). The platform pins it as
+# the "pdf-text-tool" resource. OCR for scanned pages uses pdftoppm + tesseract
+# when available (optional; the skill degrades honestly without them).

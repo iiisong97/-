@@ -1,0 +1,87 @@
+{
+  "schema": "paper2arm/pdf-structure/v1",
+  "note": "示意输出（example）。非正式案例结果。",
+  "document": {
+    "title": "A Minimal Example Paper",
+    "authors": [
+      "Alice Example",
+      "Bob Sample"
+    ],
+    "abstract": "This paper demonstrates structured PDF parsing."
+  },
+  "sections": [
+    {
+      "id": "sec-1",
+      "heading": "1 Introduction",
+      "level": 1,
+      "page": 1,
+      "paragraphs": [
+        {
+          "id": "p0",
+          "text": "Multi-column and table extraction are hard.",
+          "page": 1,
+          "bbox": [
+            72.0,
+            120.0,
+            540.0,
+            140.0
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sec-2",
+      "heading": "References",
+      "level": 1,
+      "page": 1,
+      "paragraphs": [
+        {
+          "id": "p1",
+          "text": "A. Author, A Paper, Journal, 2020.",
+          "page": 1,
+          "bbox": [
+            72.0,
+            700.0,
+            540.0,
+            712.0
+          ]
+        }
+      ]
+    }
+  ],
+  "figures": [],
+  "tables": [],
+  "equations": [],
+  "references": [
+    {
+      "id": "r1",
+      "text": "A. Author, A Paper, Journal, 2020.",
+      "page": 1,
+      "bbox": [
+        72.0,
+        700.0,
+        540.0,
+        712.0
+      ]
+    }
+  ],
+  "headers_footers": {
+    "headers": [],
+    "footers": [],
+    "page_numbers": []
+  },
+  "footnotes": [],
+  "unreadable": [],
+  "stats": {
+    "pages": 1,
+    "sections": 2,
+    "paragraphs": 2,
+    "figures": 0,
+    "tables": 0,
+    "equations": 0,
+    "references": 1,
+    "footnotes": 0,
+    "unreadable_pages": 0
+  },
+  "status": "success"
+}

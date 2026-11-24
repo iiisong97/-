@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""benchmark.py — fair A/B of the parser against a bare "raw text" baseline.
+"""benchmark.py — fair A/B: base agent (raw pdftotext dump) vs this Skill.
 
-A bare Agent that reads a PDF gets raw text with no section/table/figure/equation/
-reference structure and no page/bbox evidence. This Skill's parse_pdf.py emits a
-structured JSON where every element carries page + bbox, plus authors/affiliations
-and repeated headers/footers. Counts are computed from the same PDF, so the gain
-is a run result, not a self-claim.
+Same paper, same tools. The base agent just runs `pdftotext` and returns the
+raw text (no structure, no page evidence, no header/footer separation). The
+Skill adds a page/bbox-anchored structure with multi-column reading order,
+section headings, figures/tables/equations/references, chrome separation and
+unreadable-page reporting. Counts are run results, not self-claims.
 
 Usage:
     python3 benchmark.py <paper.pdf> --out DIR
@@ -16,83 +16,86 @@ import json
 import os
 import subprocess
 import sys
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import parse_pdf as P  # noqa: E402
 
 
-def _evidence_coverage(structure):
-    elements = []
-    for sec in structure.get("sections", []):
-        elements.append(sec.get("page"))
-        elements += [p.get("page") for p in sec.get("paragraphs", [])]
-    elements += [t.get("page") for t in structure.get("tables", [])]
-    elements += [f.get("page") for f in structure.get("figures", [])]
-    elements += [e.get("page") for e in structure.get("equations", [])]
-    elements += [r.get("page") for r in structure.get("references", [])]
-    if not elements:
-        return 0.0
-    return round(sum(1 for p in elements if p is not None) / len(elements), 3)
+def naive_baseline(pdf):
+    """What a base agent returns: one raw text blob, no structure, no evidence."""
+    proc = subprocess.run(["pdftotext", pdf, "-"],
+                          capture_output=True, text=True)
+    txt = proc.stdout or ""
+    pages = txt.rstrip("\f").count("\f") + (1 if txt.strip() else 0)
+    return {
+        "mode": "base agent (no skill)",
+        "pages": pages,
+        "sections": 0,
+        "paragraphs": 0,
+        "figures": 0,
+        "tables": 0,
+        "references": 0,
+        "headers_footers_separated": 0,
+        "paragraphs_with_page_evidence": 0,
+        "unreadable_reported": 0,
+    }
 
 
-def baseline():
-    return {"mode": "bare LLM / raw text",
-            "structured_elements": 0, "evidence_coverage": 0.0,
-            "tables": 0, "figures": 0, "equations": 0, "references": 0,
-            "authors": 0, "headers_footers": 0}
-
-
-def skill(paper, out_dir):
-    struct_path = os.path.join(out_dir, "_structure.json")
-    r = subprocess.run([sys.executable, os.path.join(HERE, "parse_pdf.py"),
-                        paper, "--out", struct_path],
-                       capture_output=True, text=True)
-    if r.returncode:
-        raise RuntimeError(r.stderr[:400])
-    s = json.load(open(struct_path, encoding="utf-8"))
-    n_elements = (len(s.get("sections", [])) + len(s.get("tables", []))
-                  + len(s.get("figures", [])) + len(s.get("equations", []))
-                  + len(s.get("references", [])))
-    hf = s.get("headers_footers", {})
-    return {"mode": "with skill (scientific-pdf-structure-parser)",
-            "structured_elements": n_elements,
-            "evidence_coverage": _evidence_coverage(s),
-            "tables": len(s.get("tables", [])),
-            "figures": len(s.get("figures", [])),
-            "equations": len(s.get("equations", [])),
-            "references": len(s.get("references", [])),
-            "authors": len(s.get("document", {}).get("authors", [])),
-            "headers_footers": len(hf.get("headers", [])) + len(hf.get("footers", [])),
-            "plaintext_pages": len(s.get("plaintext_pages", {}))}
+def skill_pipeline(pdf):
+    structure = P.parse(pdf)
+    s = structure["stats"]
+    paras_with_evidence = sum(
+        1 for sec in structure["sections"]
+        for p in sec["paragraphs"] if isinstance(p.get("page"), int))
+    return {
+        "mode": "with skill (paper2arm)",
+        "pages": s["pages"],
+        "sections": s["sections"],
+        "paragraphs": s["paragraphs"],
+        "figures": s["figures"],
+        "tables": s["tables"],
+        "references": s["references"],
+        "headers_footers_separated":
+            len(structure["headers_footers"]["headers"])
+            + len(structure["headers_footers"]["footers"])
+            + len(structure["headers_footers"]["page_numbers"]),
+        "paragraphs_with_page_evidence": paras_with_evidence,
+        "unreadable_reported": s["unreadable_pages"],
+    }
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("paper")
+    ap.add_argument("pdf")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
-
     os.makedirs(args.out, exist_ok=True)
-    base = baseline()
-    sk = skill(args.paper, args.out)
 
+    t0 = time.time()
+    base = naive_baseline(args.pdf)
+    t_base = time.time() - t0
+    t0 = time.time()
+    skill = skill_pipeline(args.pdf)
+    t_skill = time.time() - t0
+
+    gain = {k: skill[k] - base[k] for k in base if k != "mode" and isinstance(base[k], int)}
     result = {
-        "schema": "paper2arm/parse-benchmark/v1",
-        "input": {"paper": os.path.basename(args.paper)},
+        "schema": "paper2arm/pdf-benchmark/v1",
+        "paper": os.path.basename(args.pdf),
         "baseline_naive": base,
-        "skill_pipeline": sk,
-        "gain": {k: sk[k] - base[k] for k in
-                 ("structured_elements", "evidence_coverage", "tables", "figures",
-                  "equations", "references", "authors", "headers_footers")},
-        "note": "Same PDF, same tools. The Skill adds structure + page/bbox evidence "
-                "that a bare raw-text read lacks; counts are run results.",
+        "skill_pipeline": skill,
+        "gain": gain,
+        "seconds": {"base": round(t_base, 3), "skill": round(t_skill, 3)},
+        "note": "Same paper, same tools. Counts are run results; reproduce with "
+                "'python3 benchmark.py <paper.pdf> --out DIR'.",
     }
     with open(os.path.join(args.out, "benchmark.json"), "w", encoding="utf-8") as fh:
         json.dump(result, fh, ensure_ascii=False, indent=2)
-    print(f"baseline: {base}")
-    print(f"skill:    {sk}")
-    print(f"gain:     {result['gain']}")
+    print("base:", base)
+    print("skill:", skill)
+    print("gain:", gain)
 
 
 if __name__ == "__main__":

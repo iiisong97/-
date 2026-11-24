@@ -1,79 +1,46 @@
-# scientific-pdf-structure-parser
+# pdf-structure-parser — 文献 PDF 结构化解析 Skill
 
-A layout-aware, deterministic parser for scientific PDFs. It turns a PDF into a
-structured, evidence-backed JSON document so an agent can read, answer,
-translate and check a paper without the usual multi-column / table / math
-errors of naive text extraction.
+把科研 PDF 变成可继续处理、可逐字核验的结构化结果。聚焦四个质量点：
 
-## What it solves
-
-| Failure of naive PDF reading | What this skill does |
+| 质量点 | 实现 |
 |---|---|
-| Multi-column text read across columns | Detects columns per page and emits text in reading order |
-| Headings merged into body text | Separates headings from body by typography (bold + size relative to body) |
-| Tables collapsed into scrambled text | Detects aligned grids and reconstructs Markdown tables |
-| Math dropped or mangled | Detects math-font regions and records display equations separately |
-| No way to verify a claim | Every element carries `page` + `bbox` and source text |
-| Scanned pages silently guessed | Flags no-text-layer pages as uncertainty instead of hallucinating |
+| **提得全** | 词级提取正文/图表题注/脚注/参考文献；页眉页脚与页码单独分离，不混进正文 |
+| **排得对** | 按左边缘 x0 判栏、栏内自上而下栏间自左向右；先除页眉页脚再判栏，防页码伪造栏缝 |
+| **拆得清** | 章节层级（编号+关键词+字体高度）、图表题注、公式编号、参考文献、表格定位 |
+| **核得回** | 每个 paragraph/figure/table/reference 带 `page`+`bbox`；无文字层页进 `unreadable` 如实标注 |
 
-## Dependencies
-
-- Python 3.8+ (standard library only)
-- poppler-utils (`pdftohtml`, `pdftotext`) — preinstalled in the runtime
-
-## Usage
+## 快速开始
 
 ```bash
-python3 parse_pdf.py INPUT.pdf --out result.json --txt fulltext.txt
-# or
-./run.sh INPUT.pdf --out result.json
+# 解析
+python3 parse_pdf.py paper.pdf --out structure.json
+# 核验
+python3 verify_parse.py structure.json --out check.json
+# 一键（解析+核验+A/B 增益）
+python3 reproduce.py paper.pdf --out out/
+# A/B 对照（裸 Agent vs 本 Skill）
+python3 benchmark.py paper.pdf --out out/
 ```
 
-## Output schema
+## 依赖
 
-```jsonc
-{
-  "schema": "paper2arm/pdf-structure/v1",
-  "status": "success | partial | failed",
-  "document": {"page_count": N, "title": "...", "abstract": "..."},
-  "sections": [{"number": "3.2.1", "heading": "...", "level": 3,
-                "page": 4, "bbox": [l,t,w,h],
-                "paragraphs": [{"text": "...", "page": 4, "bbox": [...],
-                                "lines": [{"text": "...", "bbox": [...]}]}]}],
-  "tables": [{"page": 5, "bbox": [...], "caption": "...", "markdown": "|...|"}],
-  "figures": [{"page": 3, "bbox": [...], "caption": "Figure 1: ..."}],
-  "equations": [{"page": 4, "bbox": [...], "text": "...", "number": "1"}],
-  "references": [{"index": 1, "text": "...", "page": 15, "bbox": [...]}],
-  "uncertainty": [{"page": N, "type": "...", "note": "..."}],
-  "page_map": {"1": {"columns": [...], "blocks": [...]}}
-}
-```
+- Python 3（**仅标准库**，无 pip 依赖）。
+- 系统工具 `pdftotext`（poppler-utils，平台 `pdf-text-tool` 资源）。
+- 可选：`pdftoppm` + `tesseract`，用于扫描页 OCR；缺失时诚实降级为 `unreadable` 标注。
 
-Coordinates are in `pdftohtml -zoom 1.5` space (top-left origin, px).
+## 输出 schema
 
-## Method notes
+`paper2arm/pdf-structure/v1`：`document`（title/authors/abstract）、`sections`
+（heading/level/paragraphs 且每段带 page/bbox）、`figures`、`tables`、
+`equations`、`references`、`headers_footers`、`footnotes`、`unreadable`、`stats`。
+运行契约另要求 `case_id` + 案例 `output_contract` 全部字段 + status/sources/
+uncertainty/change_log（由 Agent 在 `result.json` 补齐，见 SKILL.md）。
 
-1. Text lines and their per-line font (size, family, weight) come from
-   `pdftohtml -xml`, which exposes the same geometry a reader sees.
-2. Font specs are merged globally because poppler declares them per page.
-3. Body font size is estimated as the median regular-weight line size; headings
-   are then detected as bold-or-larger lines relative to that baseline, plus
-   numbered/keyword patterns.
-4. Columns are found by projecting text and locating a low-density vertical
-   gutter; each block is assigned to a column and ordered top-to-bottom within
-   columns, left-to-right across columns.
-5. Tables are aligned-line grids; display equations are centered/numbered
-   math-font regions; inline math stays in the body.
+## 适用范围与限制
 
-## Limits (reported honestly, not silently)
+- 适用：有文字层的单栏/双栏学术 PDF（会议/期刊/arXiv 常见版式）。
+- 已知限制：跨栏摘要（极少见）与正文同字号的未编号子标题的层级区分有限；图片型表格标注为 image 需 OCR 复核；扫描页需 OCR。这些情况都会在输出中如实标注，而非猜测。
 
-- Scanned/image PDFs have no text layer: reported via `uncertainty`, not guessed.
-- Image-only tables are reported as such (no cells are hallucinated).
-- Very unusual layouts (poster-style) may need per-case tweaks.
+## 最小示例
 
-## Self-test
-
-```bash
-./run.sh --selftest          # import + CLI check (no PDF)
-./run.sh sample.pdf --out sample.json   # real run
-```
+见 `example/`（`structure.json` 为示意输出，已标明 example）。

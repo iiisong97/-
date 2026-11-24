@@ -1,0 +1,15 @@
+{
+  "schema": "paper2arm/pdf-verify/v1",
+  "issues": [],
+  "issues_count": 0,
+  "pass": true,
+  "stats": {
+    "sections": 2,
+    "paragraphs": 2,
+    "figures": 0,
+    "tables": 0,
+    "references": 1,
+    "unreadable_pages": 0,
+    "pages": 1
+  }
+}

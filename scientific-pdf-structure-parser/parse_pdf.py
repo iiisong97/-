@@ -1,849 +1,663 @@
 #!/usr/bin/env python3
-"""parse_pdf.py — layout-aware scientific PDF parser (poppler-based, stdlib only).
+"""parse_pdf.py — 文献 PDF 结构化解析（多栏阅读顺序 + 章节结构 + 证据定位）。
 
-Produces a structured JSON document from a scientific PDF:
+Deterministic, stdlib-only. Uses `pdftotext -bbox-layout` (poppler) to obtain
+word-level coordinates, then reconstructs, per page:
+  * running headers / footers / page numbers (repeated lines -> separated);
+  * footnotes (bottom-band, non-repeated lines -> separated);
+  * multi-column reading order (pdftotext "flow" = column; left->right, top->down);
+  * paragraph blocks (pdftotext "block");
+  * section headings (numbered / roman / keyword);
+  * figure / table / equation captions;
+  * references (after a References/Bibliography heading);
+  * title (largest text on page 1) and author/affiliation block (page-1 front matter);
+  * pages with no text layer -> `unreadable` (scanned).
 
-  - full text in reading order (single/multi-column aware)
-  - section hierarchy with per-paragraph page + bounding-box evidence
-  - tables (row/column reconstruction) with captions and evidence
-  - figures with captions and page evidence
-  - equations (detected via math fonts / symbol density) with page evidence
-  - references list
-  - honest uncertainty flags (scanned pages, image tables, unreadable regions)
-
-Design goal: deterministic and verifiable. Every element carries
-(page, bbox, source text) so the result can be checked against the original PDF.
+Every text unit carries a `page` and, where available, a `bbox` so the result
+can be traced back to the original paper (核得回).
 
 Usage:
-    python3 parse_pdf.py INPUT.pdf [--out result.json] [--txt fulltext.txt]
+    python3 parse_pdf.py input.pdf --out structure.json
 """
 
 import argparse
 import json
+import os
 import re
 import subprocess
-import xml.etree.ElementTree as ET
-from collections import defaultdict, Counter
+import tempfile
+from collections import Counter, defaultdict
 
-# ---------------------------------------------------------------------------
-# Typographic / layout constants (pdftohtml -zoom 1.5 coordinate space)
-# ---------------------------------------------------------------------------
-TITLE_MIN_SIZE = 20.0
-BOLD_HINTS = ("medi", "bold", "semibold", "demi", "heavy", "black")
-ITALIC_HINTS = ("ital", "obl", "slanted")
-MATH_FONT_HINTS = ("cmsy", "cmex", "math", "cmr", "msam", "msbm", "cmtex", "stix",
-                   "cmmi", "cmti", "cmbx", "math1", "math2")
-MONO_FONT_HINTS = ("courier", "mono", "typewriter", "sftt", "consola")
-HEADER_BAND = 55.0
-FOOTER_BAND = 55.0
-MARGIN_SIDE = 55.0
+XHTML = "{http://www.w3.org/1999/xhtml}"
 
-NUM_HEADING_RE = re.compile(r"^(\d{1,3}(?:\.\d{1,3}){0,3})[.)\u3001]?\s+(.+)$")
-ROMAN_HEADING_RE = re.compile(r"^([IVXLC]{1,8})[.)]?\s+(.+)$")
-LETTER_HEADING_RE = re.compile(r"^([A-Z])[.)]?\s+(.+)$")
-CAPTION_RE = re.compile(r"^\s*(fig(?:ure)?\.?\s*\d+|table\.?\s*\d+|scheme\.?\s*\d+)",
-                        re.IGNORECASE)
-ABSTRACT_RE = re.compile(r"^abstract$", re.IGNORECASE)
-REF_HEADING_RE = re.compile(r"^references?$", re.IGNORECASE)
-REF_ENTRY_RE = re.compile(r"^\[(\d{1,3})\]\s*(.*)$")
-EQUATION_NUM_RE = re.compile(r"\((\d{1,3}(?:\.\d{1,3})?)\)\s*$")
-PURE_NUMERIC_RE = re.compile(r"^[\d\s.,\u00d7\u00b7\u2212+\u2013%-]+$")
-MATH_SYMBOL_RE = re.compile(
-    r"[\u2200-\u22FF\u2220-\u2299\u00d7\u2212\u00b1\u221e\u222b\u2202\u2211\u221a"
-    r"\u2264\u2265\u2260\u2248\u03b1-\u03c9\u0391-\u03a9]")
+# --------------------------------------------------------------------------
+# 1. low-level extraction
+# --------------------------------------------------------------------------
+
+def _words_to_text(words):
+    return " ".join(w["text"] for w in words)
+
+
+def _block_medh(b):
+    """Median word height of a block = a font-size proxy (bold/larger => taller)."""
+    hs = sorted(w["y1"] - w["y0"] for l in b["lines"] for w in l["words"])
+    return hs[len(hs) // 2] if hs else 0.0
+
+
+def run_bbox_layout(pdf_path):
+    """Run `pdftotext -bbox-layout` and return the parsed XHTML root."""
+    fd, html_path = tempfile.mkstemp(suffix=".html")
+    os.close(fd)
+    try:
+        subprocess.run(
+            ["pdftotext", "-bbox-layout", pdf_path, html_path],
+            capture_output=True, text=True, check=False)
+        import xml.etree.ElementTree as ET
+        # pdftotext's XHTML is not strict XML: it may contain raw control
+        # characters (0x01 etc.) that XML 1.0 forbids. Strip them first.
+        raw = open(html_path, encoding="utf-8", errors="replace").read()
+        raw = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", raw)
+        root = ET.fromstring(raw)
+        return root
+    finally:
+        try:
+            os.unlink(html_path)
+        except OSError:
+            pass
+
+
+def extract_pages(root):
+    """Return a list of page dicts: width/height + ordered flows->blocks->lines->words."""
+    pages = []
+    for page_el in root.iter(XHTML + "page"):
+        page = {
+            "width": float(page_el.get("width", 0)),
+            "height": float(page_el.get("height", 0)),
+            "flows": [],
+        }
+        for flow_el in page_el.findall(XHTML + "flow"):
+            flow = {"blocks": []}
+            for block_el in flow_el.findall(XHTML + "block"):
+                block = {
+                    "x0": float(block_el.get("xMin", 0)),
+                    "y0": float(block_el.get("yMin", 0)),
+                    "x1": float(block_el.get("xMax", 0)),
+                    "y1": float(block_el.get("yMax", 0)),
+                    "lines": [],
+                }
+                for line_el in block_el.findall(XHTML + "line"):
+                    line = {
+                        "x0": float(line_el.get("xMin", 0)),
+                        "y0": float(line_el.get("yMin", 0)),
+                        "x1": float(line_el.get("xMax", 0)),
+                        "y1": float(line_el.get("yMax", 0)),
+                        "words": [],
+                    }
+                    for word_el in line_el.findall(XHTML + "word"):
+                        line["words"].append({
+                            "text": word_el.text or "",
+                            "x0": float(word_el.get("xMin", 0)),
+                            "y0": float(word_el.get("yMin", 0)),
+                            "x1": float(word_el.get("xMax", 0)),
+                            "y1": float(word_el.get("yMax", 0)),
+                        })
+                    line["text"] = _words_to_text(line["words"])
+                    block["lines"].append(line)
+                block["text"] = " ".join(l["text"] for l in block["lines"])
+                flow["blocks"].append(block)
+            page["flows"].append(flow)
+        pages.append(page)
+    return pages
+
+
+def flatten_blocks(pages):
+    """Flatten all blocks into a plain list (no ordering yet)."""
+    flat = []
+    for pi, page in enumerate(pages):
+        page_no = pi + 1
+        for fi, flow in enumerate(page["flows"]):
+            for b in flow["blocks"]:
+                if not b["text"].strip():
+                    continue
+                flat.append({
+                    "page": page_no,
+                    "page_width": page["width"],
+                    "page_height": page["height"],
+                    "flow": fi,
+                    "x0": b["x0"], "y0": b["y0"], "x1": b["x1"], "y1": b["y1"],
+                    "text": b["text"],
+                    "lines": b["lines"],
+                    "width": b["x1"] - b["x0"],
+                    "cx": (b["x0"] + b["x1"]) / 2.0,
+                })
+    return flat
+
+
+def order_body(body):
+    """Order body blocks into reading order.
+
+    Per page: full-width blocks (title/authors/abstract) read first, then each
+    text column top-to-bottom, columns left-to-right. Column count is detected
+    from the LEFT EDGES (x0) of NON-full-width blocks — a second column is a
+    distinct left margin, not a narrow heading's short width. Runs AFTER chrome
+    removal so page numbers/headers cannot fake a column gap.
+    """
+    by_page = defaultdict(list)
+    for b in body:
+        by_page[b["page"]].append(b)
+    ordered = []
+    for page_no in sorted(by_page):
+        blocks = by_page[page_no]
+        W = blocks[0]["page_width"] or 1
+
+        def is_span(b):
+            return b["width"] > 0.6 * W
+
+        narrow = [b for b in blocks if not is_span(b)]
+        two_col = False
+        split = W / 2.0
+        if len(narrow) >= 3:
+            x0s = sorted(b["x0"] for b in narrow)
+            gap, gsplit = 0.0, W / 2.0
+            for i in range(1, len(x0s)):
+                g = x0s[i] - x0s[i - 1]
+                if g > gap:
+                    gap, gsplit = g, (x0s[i] + x0s[i - 1]) / 2.0
+            two_col = gap > 0.15 * W
+
+        def col_of(b):
+            if is_span(b):
+                return 0
+            if two_col:
+                return 1 if b["x0"] < split else 2
+            return 0
+
+        blocks.sort(key=lambda b: (col_of(b), b["y0"], b["x0"]))
+        ordered.extend(blocks)
+    return ordered
+
+
+# --------------------------------------------------------------------------
+# 2. headers / footers / footnotes / page numbers
+# --------------------------------------------------------------------------
+
+def _norm(txt):
+    return re.sub(r"\s+", " ", txt).strip().lower()
+
+
+def _band_of(block, height):
+    y = block["y0"]
+    if y < 0.12 * height:
+        return "top"
+    if y > 0.88 * height:
+        return "bottom"
+    return "body"
+
+
+PAGE_NUM_RE = re.compile(r"^\d{1,4}$")
+
+
+def detect_chrome(blocks):
+    """Separate running headers/footers, page numbers and single-page footnotes."""
+    # count normalized line texts per band across pages
+    top_counts = Counter()
+    bottom_counts = Counter()
+    top_blocks, bottom_blocks = [], []
+    for b in blocks:
+        band = _band_of(b, b["page_height"])
+        if band == "top":
+            top_counts[_norm(b["text"])] += 1
+            top_blocks.append(b)
+        elif band == "bottom":
+            bottom_counts[_norm(b["text"])] += 1
+            bottom_blocks.append(b)
+
+    headers, footers, page_numbers, footnotes = set(), set(), set(), set()
+    idx = {id(b): b for b in blocks}
+
+    # repeated (>=2 pages) in a band => running header/footer
+    for b in top_blocks:
+        t = _norm(b["text"])
+        if t and top_counts[t] >= 2:
+            headers.add(id(b))
+    for b in bottom_blocks:
+        t = _norm(b["text"])
+        if t and bottom_counts[t] >= 2:
+            footers.add(id(b))
+        elif t and PAGE_NUM_RE.match(t):
+            page_numbers.add(id(b))
+        elif t and len(t) <= 60:
+            # bottom, not repeated, not a page number => likely footnote
+            footnotes.add(id(b))
+
+    def classify(b):
+        i = id(b)
+        if i in headers:
+            return "header"
+        if i in page_numbers:
+            return "page_number"
+        if i in footers:
+            return "footer"
+        if i in footnotes:
+            return "footnote"
+        return "body"
+
+    chrome = {
+        "headers": [], "footers": [], "page_numbers": [], "footnotes": [],
+    }
+    body = []
+    for b in blocks:
+        c = classify(b)
+        if c == "header":
+            chrome["headers"].append({"text": b["text"], "page": b["page"]})
+        elif c == "footer":
+            chrome["footers"].append({"text": b["text"], "page": b["page"]})
+        elif c == "page_number":
+            chrome["page_numbers"].append({"text": b["text"], "page": b["page"]})
+        elif c == "footnote":
+            chrome["footnotes"].append({
+                "text": b["text"], "page": b["page"],
+                "bbox": [b["x0"], b["y0"], b["x1"], b["y1"]]})
+        else:
+            body.append(b)
+    return body, chrome
+
+
+# --------------------------------------------------------------------------
+# 3. headings and sections
+# --------------------------------------------------------------------------
+
+NUM_HEADING_RE = re.compile(r"^(\d+(?:\.\d+){0,2})\s+(\S.{0,80})$")
+ROMAN_RE = re.compile(r"^(I{1,3}|IV|V|VI{0,3}|IX|X|XI{0,3}|XIV|XV)\s*\.?\s+(\S.{0,80})$")
+UNITS = {
+    "gib", "mib", "kib", "gb", "mb", "kb", "tb", "pb", "ghz", "mhz", "khz",
+    "hz", "ms", "s", "ns", "nm", "um", "mm", "cm", "km", "kg", "g", "mg",
+    "w", "mw", "kw", "%", "x", "mi", "ft", "db", "fps", "bps", "rpm",
+}
 HEADING_KEYWORDS = {
-    "abstract", "references", "acknowledgments", "acknowledgements", "appendix",
-    "supplementary", "introduction", "conclusion", "conclusions", "methods",
-    "method", "results", "discussion", "background", "related work",
-    "future work", "contributions",
+    "abstract", "introduction", "related work", "background", "method",
+    "methods", "materials and methods", "methodology", "experiment",
+    "experiments", "experimental setup", "results", "results and discussion",
+    "discussion", "conclusion", "conclusions", "conclusion and future work",
+    "references", "bibliography", "appendix", "acknowledgments",
+    "acknowledgements", "limitations", "future work", "evaluation",
+    "setup", "implementation", "data", "dataset", "datasets",
 }
 
 
-def parse_float(v, default=0.0):
-    try:
-        return float(v)
-    except (TypeError, ValueError):
-        return default
+def heading_info(text):
+    """Return (level, heading_text) if `text` looks like a heading, else None."""
+    t = text.strip()
+    if not t:
+        return None
+    m = NUM_HEADING_RE.match(t)
+    if m:
+        num, title = m.group(1), m.group(2)
+        top = int(num.split(".")[0])
+        if top > 20:
+            return None
+        tlow = _norm(title)
+        # reject numeric data / units / non-title fragments ("825.18 GiB",
+        # "5.91 KiB", "0.0 0.2 positional …")
+        if tlow in UNITS or re.match(r"^[\d\W]+$", title):
+            return None
+        if re.match(r"^\d+(?:[.,]\d+)?\s", title):
+            return None
+        if re.match(r"https?://", title, re.I) or title.startswith("www."):
+            return None
+        level = min(len(num.split(".")), 3)
+        return level, t
+    m = ROMAN_RE.match(t)
+    if m:
+        return 1, t
+    low = _norm(t)
+    if low in HEADING_KEYWORDS and len(t.split()) <= 8:
+        return 1, t
+    return None
 
 
-# ---------------------------------------------------------------------------
-# poppler interface
-# ---------------------------------------------------------------------------
-def pdftohtml_xml(pdf_path):
-    cmd = ["pdftohtml", "-xml", "-stdout", "-i", "-noroundcoord", pdf_path]
-    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    if proc.returncode != 0 or not proc.stdout.strip():
-        raise RuntimeError("pdftohtml failed: " + (proc.stderr or proc.stdout or "unknown"))
-    text = proc.stdout
-    start = text.find("<?xml")
-    if start < 0:
-        start = text.find("<pdf2xml")
-    if start < 0:
-        raise RuntimeError("pdftohtml produced no XML")
-    return ET.fromstring(text[start:])
+BARE_NUM_RE = re.compile(r"^\d{1,3}(?:\.\d{1,2}){0,2}$")
 
 
-# ---------------------------------------------------------------------------
-# Data model
-# ---------------------------------------------------------------------------
-class Line:
-    __slots__ = ("top", "left", "width", "height", "font", "text", "font_size",
-                 "family", "color", "bold", "italic", "mono", "mathy")
-
-    def __init__(self, top, left, width, height, font, text, fontspec):
-        self.top = top
-        self.left = left
-        self.width = width
-        self.height = height
-        self.font = font
-        self.text = text
-        self.font_size = parse_float(fontspec.get("size"), 0.0)
-        self.family = fontspec.get("family", "")
-        self.color = fontspec.get("color", "#000000")
-        fam = self.family.lower()
-        self.bold = any(h in fam for h in BOLD_HINTS)
-        self.italic = any(h in fam for h in ITALIC_HINTS)
-        self.mono = any(h in fam for h in MONO_FONT_HINTS)
-        self.mathy = any(h in fam for h in MATH_FONT_HINTS)
-
-    @property
-    def right(self):
-        return self.left + self.width
-
-    @property
-    def bottom(self):
-        return self.top + self.height
-
-    @property
-    def center_x(self):
-        return self.left + self.width / 2.0
-
-    @property
-    def bbox(self):
-        return [round(self.left, 1), round(self.top, 1),
-                round(self.width, 1), round(self.height, 1)]
-
-    @property
-    def stripped(self):
-        return self.text.strip()
+def merge_split_headings(body, body_h):
+    """Merge a bare section number ("2") with the heading on the same line that
+    pdftotext split into a separate block ("2" + "Background" -> "2 Background")."""
+    merged = []
+    i = 0
+    while i < len(body):
+        b = body[i]
+        t = b["text"].strip()
+        nxt = body[i + 1] if i + 1 < len(body) else None
+        if (BARE_NUM_RE.fullmatch(t) and nxt is not None
+                and abs(nxt["y0"] - b["y0"]) < 10
+                and nxt["text"].strip()
+                and nxt["text"].strip()[0].isupper()
+                and _block_medh(nxt) > body_h * 1.1):
+            combined = dict(nxt)
+            combined["text"] = t + " " + nxt["text"].strip()
+            merged.append(combined)
+            i += 2
+            continue
+        merged.append(b)
+        i += 1
+    return merged
 
 
-class Block:
-    __slots__ = ("lines", "page", "kind", "col")
+def build_sections(body, pages, body_h=None, title=""):
+    """Group body blocks into sections by headings; keep page+bbox per paragraph."""
+    if body_h is None:
+        hs = sorted(_block_medh(b) for b in body if b["text"].strip())
+        body_h = hs[len(hs) // 2] if hs else 9.0
+    sections = []
+    current = {"heading": "Front matter", "level": 0, "page": 1,
+               "paragraphs": [], "id": "sec-front"}
+    pre_abstract = []
+    abstract_done = False
+    back_matter = False  # after References: no more heading detection
 
-    def __init__(self, lines, page):
-        self.lines = lines
-        self.page = page
-        self.kind = "body"
-        self.col = -1
+    for b in body:
+        bt = b["text"].strip()
+        if bt == title:
+            continue
+        h = heading_info(bt)
+        if h is None and not back_matter and _looks_like_unheaded_heading(b, body_h):
+            h = (1, bt)
+        if h is not None and _is_standalone_heading(b):
+            if _norm(bt) in ("references", "bibliography"):
+                back_matter = True
+            level, htext = h
+            if current["paragraphs"] or current["heading"] != "Front matter":
+                sections.append(current)
+            current = {
+                "heading": htext, "level": level, "page": b["page"],
+                "paragraphs": [], "id": "sec-%d" % (len(sections) + 1),
+            }
+            if _norm(htext) == "abstract":
+                abstract_done = True
+            continue
 
-    @property
-    def text(self):
-        return " ".join(l.stripped for l in self.lines).strip()
-
-    @property
-    def top(self):
-        return min(l.top for l in self.lines)
-
-    @property
-    def bottom(self):
-        return max(l.bottom for l in self.lines)
-
-    @property
-    def left(self):
-        return min(l.left for l in self.lines)
-
-    @property
-    def right(self):
-        return max(l.right for l in self.lines)
-
-    @property
-    def width(self):
-        return self.right - self.left
-
-    @property
-    def height(self):
-        return self.bottom - self.top
-
-    @property
-    def center_x(self):
-        return (self.left + self.right) / 2.0
-
-    @property
-    def bbox(self):
-        return [round(self.left, 1), round(self.top, 1),
-                round(self.width, 1), round(self.height, 1)]
-
-    @property
-    def max_font_size(self):
-        return max((l.font_size for l in self.lines), default=0.0)
-
-    @property
-    def is_bold(self):
-        return any(l.bold for l in self.lines)
-
-    @property
-    def n_math_symbols(self):
-        return sum(len(MATH_SYMBOL_RE.findall(l.text)) for l in self.lines)
-
-    @property
-    def is_mathy(self):
-        return all(l.mathy for l in self.lines) or self.n_math_symbols >= 2
-
-
-# ---------------------------------------------------------------------------
-# Heading detection (body-size relative)
-# ---------------------------------------------------------------------------
-def is_heading_line(line, body_size):
-    if line.font_size >= TITLE_MIN_SIZE:
-        return True
-    txt = line.stripped
-    low = txt.lower()
-    if line.bold and line.font_size >= body_size - 1.0 and len(txt) <= 110:
-        return True
-    if line.font_size >= body_size + 4.0 and len(txt) <= 110:
-        return True
-    # Bold numbered / keyword headings even if not much larger.
-    if line.bold and (NUM_HEADING_RE.match(txt) or ROMAN_HEADING_RE.match(txt)
-                      or low in HEADING_KEYWORDS):
-        return True
-    return False
-
-
-def classify_block(block, body_size):
-    txt = block.text
-    if not txt:
-        return "empty"
-    low = txt.strip().lower()
-    if block.page == 1 and block.max_font_size >= TITLE_MIN_SIZE and len(txt) < 200:
-        return "title"
-    first = block.lines[0]
-    if is_heading_line(first, body_size) and len(txt) <= 110:
-        if ABSTRACT_RE.match(low):
-            return "abstract-heading"
-        if REF_HEADING_RE.match(low):
-            return "references-heading"
-        return "heading"
-    if CAPTION_RE.match(txt.strip()):
-        return "caption"
-    return "body"
-
-
-# ---------------------------------------------------------------------------
-# Block grouping
-# ---------------------------------------------------------------------------
-def typo_kind(line, body_size):
-    if is_heading_line(line, body_size):
-        return "heading"
-    if line.mathy:
-        return "math"
-    return "body"
-
-
-def group_lines_into_blocks(lines, body_size):
-    if not lines:
-        return []
-    lines = sorted(lines, key=lambda l: (l.top, l.left))
-    blocks = []
-    cur = [lines[0]]
-    for line in lines[1:]:
-        prev = cur[-1]
-        gap = line.top - prev.bottom
-        avg_h = max(2.0, (line.height + prev.height) / 2.0)
-        x_overlap = min(prev.right, line.right) - max(prev.left, line.left)
-        x_overlap_ratio = x_overlap / max(1.0, min(prev.width, line.width))
-        big_gap = gap > avg_h * 2.2
-        side_jump = gap > avg_h * 0.9 and x_overlap_ratio < 0.15
-        typo_change = typo_kind(line, body_size) != typo_kind(prev, body_size)
-        font_jump = abs(line.font_size - prev.font_size) > 3.5
-        if big_gap or side_jump or typo_change or font_jump:
-            blocks.append(cur)
-            cur = [line]
-        else:
-            cur.append(line)
-    blocks.append(cur)
-    return blocks
-
-
-# ---------------------------------------------------------------------------
-# Column detection
-# ---------------------------------------------------------------------------
-def detect_columns(blocks, page_width):
-    body = [b for b in blocks if b.width > 30 and b.max_font_size < TITLE_MIN_SIZE]
-    if not body:
-        return [(MARGIN_SIDE, page_width - MARGIN_SIDE)]
-    left_edge = min(b.left for b in body)
-    right_edge = max(b.right for b in body)
-    text_span = right_edge - left_edge
-    if text_span < page_width * 0.45:
-        return [(left_edge, right_edge)]
-
-    # Find a low-density vertical gutter in the middle of the text span.
-    best_split = None
-    best_score = float("inf")
-    total_height = sum(b.height for b in body)
-    mid = (left_edge + right_edge) / 2.0
-    for split_x in range(int(mid - text_span * 0.30), int(mid + text_span * 0.30), 10):
-        density = sum(b.height for b in body if b.left < split_x < b.right)
-        if density < best_score:
-            best_score = density
-            best_split = split_x
-    if best_split is not None and best_score < total_height * 0.08:
-        return [(left_edge, best_split), (best_split, right_edge)]
-    return [(left_edge, right_edge)]
-
-
-# ---------------------------------------------------------------------------
-# Table detection / reconstruction
-# ---------------------------------------------------------------------------
-def looks_like_table(block):
-    if len(block.lines) < 2:
-        return False
-    starts = [l.left for l in block.lines]
-    if max(starts) - min(starts) > 25:
-        return False
-    for l in block.lines:
-        if len(re.split(r"\s{2,}", l.stripped)) >= 3:
-            return True
-    return False
-
-
-def block_to_markdown_table(block):
-    rows = []
-    for l in block.lines:
-        cells = [c.strip() for c in re.split(r"\s{2,}", l.stripped) if c.strip()]
-        if cells:
-            rows.append(cells)
-    if not rows:
-        return ""
-    ncols = max(len(r) for r in rows)
-    rows = [r + [""] * (ncols - len(r)) for r in rows]
-    lines = ["| " + " | ".join(rows[0]) + " |",
-             "| " + " | ".join(["---"] * ncols) + " |"]
-    for r in rows[1:]:
-        lines.append("| " + " | ".join(r) + " |")
-    return "\n".join(lines)
-
-
-# ---------------------------------------------------------------------------
-# Main parsing
-# ---------------------------------------------------------------------------
-def parse_pdf(pdf_path):
-    root = pdftohtml_xml(pdf_path)
-    # Font specs are declared per page but referenced globally, so merge them all.
-    global_fontspecs = {}
-    for fs in root.findall(".//fontspec"):
-        global_fontspecs[fs.get("id")] = {
-            "size": fs.get("size"), "family": fs.get("family", ""),
-            "color": fs.get("color", "#000000"),
+        para = {
+            "id": "p%d" % len(current["paragraphs"]),
+            "text": b["text"],
+            "page": b["page"],
+            "bbox": [round(b["x0"], 1), round(b["y0"], 1),
+                     round(b["x1"], 1), round(b["y1"], 1)],
         }
-    pages = []
-    all_sizes = []
-    for page_el in root.findall(".//page"):
-        pw = parse_float(page_el.get("width"), 918.0)
-        ph = parse_float(page_el.get("height"), 1188.0)
-        lines = []
-        for t in page_el.findall(".//text"):
-            line = Line(parse_float(t.get("top")), parse_float(t.get("left")),
-                        parse_float(t.get("width")), parse_float(t.get("height")),
-                        t.get("font"), t.text or "",
-                        global_fontspecs.get(t.get("font"), {}))
-            lines.append(line)
-            if not line.bold and not line.mono and 8.0 <= line.font_size < 20.0:
-                all_sizes.append(line.font_size)
-        pages.append({"number": int(page_el.get("number")), "width": pw,
-                      "height": ph, "lines": lines})
+        current["paragraphs"].append(para)
 
-    # Global body font size: median of regular-weight line sizes.
-    body_size = 13.0
-    if all_sizes:
-        all_sizes.sort()
-        body_size = all_sizes[len(all_sizes) // 2]
+    if current["paragraphs"] or current["heading"] != "Front matter":
+        sections.append(current)
+    return sections
 
-    doc = {
+
+def _is_standalone_heading(b):
+    """A heading is a short block: <= 12 words and no trailing sentence period
+    (except abbreviations)."""
+    t = b["text"].strip()
+    if len(t.split()) > 12:
+        return False
+    # reject lines that end with a sentence-ending period and are long sentences
+    if t.endswith(".") and len(t.split()) > 4:
+        return False
+    return True
+
+
+def _looks_like_unheaded_heading(b, body_h):
+    """Detect unnumbered section headings (e.g. "Model Architecture", "Training")
+    by font-size proxy + shape: taller than body text, short, title-case,
+    no ending period, not a caption."""
+    t = b["text"].strip()
+    nw = len(t.split())
+    if not (1 <= nw <= 8):
+        return False
+    if t.endswith((".", ",", ":", ";")) and nw > 2:
+        return False
+    if FIG_TAB_RE.match(t) or EQ_RE.match(t):
+        return False
+    if _block_medh(b) < body_h * 1.2:
+        return False
+    # title-case: first char upper, and not all-lowercase body-like
+    if not t[0].isupper():
+        return False
+    # reject obvious table/author/caption fragments
+    if "@" in t or "·" in t or "∗" in t:
+        return False
+    if re.match(r"https?://", t, re.I) or t.startswith("www."):
+        return False
+    digits = sum(c.isdigit() for c in t)
+    if digits >= 3 and digits / max(len(t), 1) > 0.25:
+        return False
+    return True
+
+
+# --------------------------------------------------------------------------
+# 4. captions / equations / references
+# --------------------------------------------------------------------------
+
+FIG_TAB_RE = re.compile(
+    r"^(Fig(?:ure)?\.?|Tab(?:le)?\.?)\s*(\d+)[:.\s]*(.*)$", re.IGNORECASE)
+EQ_RE = re.compile(r"^(?:Equation|Eq\.?)\s*\(?(\d+)\)?[:.\s]*(.*)$", re.IGNORECASE)
+
+
+def extract_captions(body):
+    figures, tables, equations = [], [], []
+    for b in body:
+        t = b["text"].strip()
+        m = FIG_TAB_RE.match(t)
+        if m:
+            kind, num, rest = m.group(1).lower(), m.group(2), m.group(3)
+            rec = {"id": "%s %s" % ("Figure" if kind.startswith("fig") else "Table", num),
+                   "caption": (rest or t), "page": b["page"],
+                   "bbox": [round(b["x0"], 1), round(b["y0"], 1),
+                            round(b["x1"], 1), round(b["y1"], 1)]}
+            (figures if kind.startswith("fig") else tables).append(rec)
+            continue
+        m = EQ_RE.match(t)
+        if m:
+            equations.append({
+                "id": "Eq. (%s)" % m.group(1), "content": (m.group(2) or t),
+                "page": b["page"],
+                "bbox": [round(b["x0"], 1), round(b["y0"], 1),
+                         round(b["x1"], 1), round(b["y1"], 1)]})
+    return figures, tables, equations
+
+
+def extract_references(body):
+    """Return reference entries: blocks after a References/Bibliography heading."""
+    refs = []
+    in_refs = False
+    for b in body:
+        low = _norm(b["text"])
+        if low in ("references", "bibliography"):
+            in_refs = True
+            continue
+        if in_refs:
+            # a new numbered section ends the reference list
+            if heading_info(b["text"]) is not None:
+                break
+            if b["text"].strip():
+                refs.append({
+                    "id": "r%d" % (len(refs) + 1),
+                    "text": b["text"].strip(),
+                    "page": b["page"],
+                    "bbox": [round(b["x0"], 1), round(b["y0"], 1),
+                             round(b["x1"], 1), round(b["y1"], 1)]})
+    return refs
+
+
+# --------------------------------------------------------------------------
+# 5. title / authors / abstract
+# --------------------------------------------------------------------------
+
+def detect_title_and_authors(pages):
+    """Title = largest text on page 1; authors = remaining page-1 blocks before
+    the abstract heading."""
+    if not pages:
+        return "", [], ""
+    p1 = pages[0]
+    title = ""
+    title_score = -1.0
+    author_blocks = []
+
+    flows = sorted(p1["flows"], key=lambda f: min(
+        (b["x0"] for b in f["blocks"]), default=0))
+    blocks = sorted((b for f in flows for b in f["blocks"]),
+                    key=lambda b: (b["y0"], b["x0"]))
+
+    # title: block with largest median word height on page 1 (font-size proxy),
+    # excluding running headers (arXiv/DOI/date lines) and tiny blocks.
+    def _is_meta_line(t):
+        return bool(re.match(r"(arxiv\s*:)|(doi\s*[:.])|(https?://)", t, re.I)) \
+            or re.match(r"^\[cs\.[A-Z]+\]", t)
+
+    for b in blocks:
+        if _is_meta_line(b["text"].strip()):
+            continue
+        heights = [w["y1"] - w["y0"] for l in b["lines"] for w in l["words"]]
+        if not heights:
+            continue
+        med = sorted(heights)[len(heights) // 2]
+        if med > title_score:
+            title_score = med
+            title = b["text"].strip()
+
+    # authors/affiliations: top page-1 blocks that are not the title and come
+    # before the abstract; keep them as front matter.
+    if title:
+        for b in blocks:
+            t = b["text"].strip()
+            if not t or t == title:
+                continue
+            low = _norm(t)
+            if low == "abstract":
+                break
+            if len(t) <= 200 and ("," in t or "@" in t or "university" in low
+                                  or "department" in low or "school" in low
+                                  or "institute" in low or "laboratory" in low):
+                author_blocks.append(t)
+
+    return title, author_blocks, ""
+
+
+def extract_abstract(body):
+    """Join paragraphs between the Abstract heading and the first numbered section."""
+    parts = []
+    in_abs = False
+    for b in body:
+        t = b["text"].strip()
+        low = _norm(t)
+        if low == "abstract":
+            in_abs = True
+            continue
+        if low.startswith("abstract ") or low.startswith("abstract\n"):
+            # "Abstract" heading merged with its text into one block
+            in_abs = True
+            parts.append(t[len("Abstract"):].strip())
+            continue
+        if in_abs:
+            h = heading_info(t)
+            if h is not None and _is_standalone_heading(b):
+                break
+            if t:
+                parts.append(t)
+    return " ".join(parts)
+
+
+# --------------------------------------------------------------------------
+# 6. unreadable pages (scanned / no text layer)
+# --------------------------------------------------------------------------
+
+def detect_unreadable(pages):
+    unreadable = []
+    for pi, page in enumerate(pages):
+        page_no = pi + 1
+        words = [w for f in page["flows"] for b in f["blocks"]
+                 for l in b["lines"] for w in l["words"]]
+        if not words:
+            unreadable.append({
+                "page": page_no,
+                "reason": "no text layer (scanned page / image-only); run OCR",
+            })
+    return unreadable
+
+
+# --------------------------------------------------------------------------
+# 7. main
+# --------------------------------------------------------------------------
+
+def parse(pdf_path):
+    root = run_bbox_layout(pdf_path)
+    pages = extract_pages(root)
+    flat = flatten_blocks(pages)
+    body, chrome = detect_chrome(flat)
+    body = order_body(body)
+
+    title, authors, _ = detect_title_and_authors(pages)
+    abstract = extract_abstract(body)
+    hs = sorted(_block_medh(b) for b in body if b["text"].strip())
+    body_h = hs[len(hs) // 2] if hs else 9.0
+    body = merge_split_headings(body, body_h)
+    sections = build_sections(body, pages, body_h=body_h, title=title)
+    figures, tables, equations = extract_captions(body)
+    references = extract_references(body)
+    unreadable = detect_unreadable(pages)
+
+    # merge front-matter paragraphs into document.authors if not captured
+    if not authors:
+        fm = [p["text"] for p in sections[0]["paragraphs"]] if sections else []
+        # only treat the very first section as front matter when it precedes Abstract
+        if fm and (sections[0]["heading"] == "Front matter"):
+            authors = fm
+
+    return {
         "schema": "paper2arm/pdf-structure/v1",
-        "status": "partial",
-        "document": {"page_count": len(pages), "body_font_size": round(body_size, 1)},
-        "sections": [],
-        "tables": [],
-        "figures": [],
-        "equations": [],
-        "references": [],
-        "uncertainty": [],
-        "page_map": {},
-        "_pdf_path": pdf_path,
-        "_margin": {},
+        "document": {
+            "title": title,
+            "authors": authors,
+            "abstract": abstract,
+        },
+        "sections": sections,
+        "figures": figures,
+        "tables": tables,
+        "equations": equations,
+        "references": references,
+        "headers_footers": {
+            "headers": list(dict.fromkeys(h["text"] for h in chrome["headers"])),
+            "footers": list(dict.fromkeys(f["text"] for f in chrome["footers"])),
+            "page_numbers": [p["text"] for p in chrome["page_numbers"]],
+        },
+        "footnotes": chrome["footnotes"],
+        "unreadable": unreadable,
+        "stats": {
+            "pages": len(pages),
+            "sections": len(sections),
+            "paragraphs": sum(len(s["paragraphs"]) for s in sections),
+            "figures": len(figures),
+            "tables": len(tables),
+            "equations": len(equations),
+            "references": len(references),
+            "footnotes": len(chrome["footnotes"]),
+            "unreadable_pages": len(unreadable),
+        },
+        "status": "success",
     }
 
-    running_section = None
-    in_abstract = False
-    for page in pages:
-        pn = page["number"]
-        core_lines = []
-        margin = {"top": [], "bottom": [], "left": [], "right": []}
-        for l in page["lines"]:
-            in_margin = (l.top < HEADER_BAND
-                         or (page["height"] - l.bottom) < FOOTER_BAND
-                         or l.left < MARGIN_SIDE
-                         or (page["width"] - l.right) < MARGIN_SIDE)
-            if not in_margin or l.font_size >= TITLE_MIN_SIZE:
-                core_lines.append(l)
-            else:
-                txt = (l.text or "").strip()
-                if not txt:
-                    continue
-                if l.top < HEADER_BAND:
-                    margin["top"].append(txt)
-                elif (page["height"] - l.bottom) < FOOTER_BAND:
-                    margin["bottom"].append(txt)
-                elif l.left < MARGIN_SIDE:
-                    margin["left"].append(txt)
-                else:
-                    margin["right"].append(txt)
-        doc["_margin"][pn] = margin
 
-        blocks = [Block(bl, pn) for bl in group_lines_into_blocks(core_lines, body_size)]
-        columns = detect_columns(blocks, page["width"])
-
-        def column_index(b):
-            if b.width > (page["width"] * 0.75) or len(columns) == 1:
-                return -1
-            cx = b.center_x
-            for i, (x0, x1) in enumerate(columns):
-                if x0 <= cx <= x1:
-                    return i
-            return min(range(len(columns)),
-                       key=lambda i: abs((columns[i][0] + columns[i][1]) / 2 - cx))
-
-        blocks = [b for b in blocks if b.text]
-        for b in blocks:
-            b.col = column_index(b)
-
-        span = sorted([b for b in blocks if b.col == -1], key=lambda b: b.top)
-        col_blocks = defaultdict(list)
-        for b in blocks:
-            if b.col != -1:
-                col_blocks[b.col].append(b)
-        ordered = list(span)
-        for ci in sorted(col_blocks.keys()):
-            ordered.extend(sorted(col_blocks[ci], key=lambda b: b.top))
-
-        pmap = {"width": round(page["width"], 1), "height": round(page["height"], 1),
-                "columns": [[round(c[0], 1), round(c[1], 1)] for c in columns],
-                "blocks": []}
-
-        def is_centered(b):
-            if 0 <= b.col < len(columns):
-                x0, x1 = columns[b.col]
-                return abs(b.center_x - (x0 + x1) / 2) < (x1 - x0) * 0.30
-            return abs(b.center_x - page["width"] / 2) < page["width"] * 0.20
-
-        for b in ordered:
-            kind = classify_block(b, body_size)
-            # A mathy block is a *display* equation only when centered in its
-            # column or carrying an equation number; otherwise inline math -> body.
-            if kind == "body" and b.is_mathy and len(b.text) < 400:
-                if is_centered(b) or EQUATION_NUM_RE.search(b.text):
-                    kind = "equation"
-            # Bold short lines that are really table cells (multi-column or pure
-            # numeric) must not be emitted as section headings.
-            if kind == "heading" and (looks_like_table(b) or PURE_NUMERIC_RE.match(b.text.strip())):
-                kind = "table"
-            if kind == "body" and looks_like_table(b):
-                kind = "table"
-
-            pmap["blocks"].append({
-                "bbox": b.bbox, "kind": kind, "font_size": round(b.max_font_size, 1),
-                "bold": b.is_bold, "col": b.col, "text_preview": b.text[:160],
-            })
-
-            if kind == "title":
-                if not doc["document"].get("title"):
-                    doc["document"]["title"] = b.text
-                continue
-            if kind == "abstract-heading":
-                running_section = {"heading": b.text, "level": 1, "page": pn,
-                                   "bbox": b.bbox, "paragraphs": [], "number": None}
-                doc["sections"].append(running_section)
-                in_abstract = True
-                continue
-            if kind == "references-heading":
-                running_section = {"heading": b.text, "level": 1, "page": pn,
-                                   "bbox": b.bbox, "paragraphs": [], "number": None,
-                                   "is_refs": True}
-                doc["sections"].append(running_section)
-                in_abstract = False
-                continue
-            if kind == "heading":
-                num = None
-                m = (NUM_HEADING_RE.match(b.text) or ROMAN_HEADING_RE.match(b.text)
-                     or LETTER_HEADING_RE.match(b.text))
-                if m:
-                    num = m.group(1)
-                level = (b.text.count(".") + 1) if (num and "." in b.text) else 1
-                running_section = {"heading": b.text, "level": level, "page": pn,
-                                   "bbox": b.bbox, "paragraphs": [], "number": num}
-                doc["sections"].append(running_section)
-                in_abstract = False
-                continue
-            if kind == "caption":
-                if re.match(r"^\s*fig", b.text, re.IGNORECASE):
-                    doc["figures"].append({"page": pn, "bbox": b.bbox,
-                                           "caption": b.text})
-                else:
-                    doc["tables"].append({"page": pn, "bbox": b.bbox,
-                                          "caption": b.text, "markdown": None,
-                                          "rows": None})
-                continue
-            if kind == "equation":
-                num_m = EQUATION_NUM_RE.search(b.text)
-                doc["equations"].append({"page": pn, "bbox": b.bbox, "text": b.text,
-                                         "number": num_m.group(1) if num_m else None})
-                continue
-            if kind == "table":
-                doc["tables"].append({
-                    "page": pn, "bbox": b.bbox, "caption": None,
-                    "markdown": block_to_markdown_table(b),
-                    "rows": [re.split(r"\s{2,}", l.stripped) for l in b.lines]})
-                continue
-
-            # body paragraph
-            para = {"text": b.text, "page": pn, "bbox": b.bbox,
-                    "lines": [{"text": l.stripped, "bbox": l.bbox} for l in b.lines]}
-
-            if in_abstract:
-                if not doc["document"].get("abstract"):
-                    doc["document"]["abstract"] = b.text
-                else:
-                    doc["document"]["abstract"] += " " + b.text
-
-            if running_section is not None and running_section.get("is_refs"):
-                for l in b.lines:
-                    m = REF_ENTRY_RE.match(l.stripped)
-                    if m:
-                        doc["references"].append({"index": int(m.group(1)),
-                                                  "text": m.group(2).strip(),
-                                                  "page": pn, "bbox": l.bbox})
-                running_section["paragraphs"].append(para)
-            elif running_section is not None:
-                running_section["paragraphs"].append(para)
-            else:
-                # Preamble body (authors / affiliations) — keep as first section.
-                if not any(s.get("number") is None and s["heading"] == "Preamble"
-                           for s in doc["sections"]):
-                    running_section = {"heading": "Preamble", "level": 0, "page": pn,
-                                       "bbox": b.bbox, "paragraphs": [], "number": None}
-                    doc["sections"].insert(0, running_section)
-                running_section["paragraphs"].append(para)
-
-        doc["page_map"][str(pn)] = pmap
-
-    # Scanned / no-text pages.
-    for pn, pm in doc["page_map"].items():
-        if not any(b["kind"] != "empty" for b in pm["blocks"]):
-            doc["uncertainty"].append({
-                "page": int(pn), "type": "no_text_layer",
-                "note": "No extractable text layer; likely scanned/image PDF — OCR required."})
-
-    # Keep all headings (a heading may legitimately have no direct paragraphs,
-    # e.g. "6 Results" followed directly by "6.1 …"). Only strip internal flags.
-    for s in doc["sections"]:
-        s.pop("is_refs", None)
-
-    if doc["document"].get("title") and doc["sections"]:
-        doc["status"] = "success"
-    elif doc["sections"] or doc["document"].get("title"):
-        doc["status"] = "partial"
-    enrich_evidence(doc)
-    extract_document_metadata(doc)
-    doc.pop("_pdf_path", None)
-    doc.pop("_margin", None)
-    return doc
-
-
-def extract_document_metadata(doc):
-    """Add authors/affiliations (front matter) and repeated headers/footers.
-
-    These are required coverage for document-parsing tasks but are not body
-    content, so they are separated out rather than merged into sections."""
-    # 1. repeated margin text = running headers / footers / page numbers
-    margin = doc.get("_margin", {})
-    for band, out_key in (("top", "headers"), ("bottom", "footers")):
-        counter = Counter()
-        for pn, m in margin.items():
-            for txt in m.get(band, []):
-                key = re.sub(r"\s+", " ", txt).strip()
-                if key:
-                    counter[key] += 1
-        repeated = sorted((k for k, c in counter.items() if c >= 2),
-                          key=lambda k: -counter[k])
-        doc.setdefault("headers_footers", {})[out_key] = repeated
-
-    # 2. front matter = author block on page 1 (sections before the Abstract)
-    authors, affiliations = [], []
-    for sec in doc.get("sections", []):
-        if sec.get("page") != 1:
-            break
-        if sec.get("number") is not None:
-            break
-        h = (sec.get("heading") or "").strip().lower()
-        if h in ("preamble", "abstract", ""):
-            body = " ".join(p.get("text", "") for p in sec.get("paragraphs", []))
-            if h == "preamble" and "©" in body or "copyright" in body:
-                continue
-            continue
-        # heading is a name list; body holds affiliations/emails
-        name_line = (sec.get("heading") or "").strip()
-        if name_line and not any(ch.isdigit() for ch in name_line):
-            for part in re.split(r"[,;]", name_line):
-                part = re.sub(r"\s+", " ", part).strip()
-                if len(part) > 3 and part not in authors:
-                    authors.append(part)
-        for p in sec.get("paragraphs", []):
-            for frag in re.split(r"[,;]", p.get("text", "")):
-                frag = re.sub(r"\s+", " ", frag).strip()
-                if len(frag) > 3 and any(kw in frag.lower() for kw in
-                        ("university", "institute", "laboratory", "department",
-                         "school", "college", "google", "microsoft", "inc", "@",
-                         "academy", "center", "centre", "research")):
-                    if frag not in affiliations:
-                        affiliations.append(frag)
-    if authors:
-        doc["document"]["authors"] = authors
-    if affiliations:
-        doc["document"]["affiliations"] = affiliations
-    return doc
-
-
-# ---------------------------------------------------------------------------
-# Evidence enrichment: figure/table numbers, types, citation cross-references,
-# figure image regions, and table caption<->body merging. This turns the raw
-# layout parse into the evidence base the PPT builder can trace every slide to.
-# ---------------------------------------------------------------------------
-FIG_NUM_RE = re.compile(r"\bfi?g(?:ure)?\.?\s*(\d+)\b", re.IGNORECASE)
-TABLE_NUM_RE = re.compile(r"\btable\.?\s*(\d+)\b", re.IGNORECASE)
-
-SCHEMATIC_HINTS = ("architecture", "diagram", "schematic", "overview",
-                   "illustration", "example of", "visualization", "attention head",
-                   "model architecture", "encoder and decoder", "pipeline", "flow")
-DATA_HINTS = ("result", "bleu", "accuracy", "f1", "performance", "comparison",
-              "achieves", "state-of-the-art", "ablation", "variation", "evaluation",
-              "training cost", "benchmark", "metric", "perplexity", "ppl")
-
-
-def _figure_number(caption):
-    m = FIG_NUM_RE.search(caption or "")
-    return int(m.group(1)) if m else None
-
-
-def _table_number(caption):
-    m = TABLE_NUM_RE.search(caption or "")
-    return int(m.group(1)) if m else None
-
-
-def _classify_evidence_type(caption):
-    low = (caption or "").lower()
-    if re.match(r"^\s*table", low):
-        return "table"
-    if any(w in low for w in SCHEMATIC_HINTS):
-        return "schematic"
-    if any(w in low for w in DATA_HINTS):
-        return "data"
-    return "figure"
-
-
-def _estimate_figure_region(cap_bbox, page_blocks, columns=None):
-    """Region of the figure image: the space directly above its caption.
-
-    bbox order is [left, top, width, height] in pdftohtml zoom-1.5 coordinates.
-    The caption is usually narrower than the figure, so expand horizontally to
-    the text column the caption sits in.
-    """
-    left, top, width, height = cap_bbox
-    if columns:
-        cx = left + width / 2
-        for (cl, cr) in columns:
-            if cl - 10 <= cx <= cr + 10:
-                left, width = cl, cr - cl
-                break
-    right = left + width
-    above = []
-    for b in page_blocks:
-        bl, bt, bw, bh = b["bbox"]
-        if bh <= 0 or b.get("kind") in ("caption", "empty"):
-            continue
-        if bt + bh <= top + 4:                       # ends at/above the caption
-            if bl + bw > left - 40 and bl < right + 40:   # horizontal overlap
-                above.append(bt + bh)                # block bottom
-    if above:
-        region_top = max(above) + 3
-    else:
-        region_top = 55
-    region_height = top - region_top
-    if region_height < 60:                            # no room above: fallback band
-        region_top = max(55, top - 320)
-        region_height = top - region_top
-    return [left, region_top, width, region_height]
-
-
-def _estimate_table_region(cap_bbox, page_blocks, columns=None):
-    """Region of a table: its caption plus the body below it, down to the next
-    non-table text block. bbox order is [left, top, width, height]."""
-    left, top, width, height = cap_bbox
-    if columns:
-        cx = left + width / 2
-        for (cl, cr) in columns:
-            if cl - 10 <= cx <= cr + 10:
-                left, width = cl, cr - cl
-                break
-    right = left + width
-    below = []
-    for b in page_blocks:
-        bl, bt, bw, bh = b["bbox"]
-        if bh <= 0 or b.get("kind") in ("caption", "empty", "table"):
-            continue
-        if bt >= top + height - 2 and bl + bw > left - 40 and bl < right + 40:
-            below.append(bt)
-    region_bottom = (min(below) - 3) if below else top + height + 400
-    region_height = min(region_bottom - top, 800)
-    return [left, top, width, region_height]
-
-
-def _merge_table_bodies(tables):
-    """Attach caption-less table-cell blocks to the captioned table above them."""
-    primary = [t for t in tables if t.get("caption") and TABLE_NUM_RE.search(t["caption"])]
-    anonymous = [t for t in tables if not (t.get("caption") and TABLE_NUM_RE.search(t["caption"]))]
-    for anon in anonymous:
-        cands = [p for p in primary
-                 if p["page"] == anon["page"] and p["bbox"][1] < anon["bbox"][1]]
-        if not cands:
-            cands = [p for p in primary
-                     if p["page"] == anon["page"] - 1]   # caption at top of prev page
-        if cands:
-            target = max(cands, key=lambda p: p["bbox"][1])
-            if target.get("markdown") is None:
-                target["markdown"] = anon.get("markdown") or ""
-                target["rows"] = anon.get("rows")
-            else:
-                target["markdown"] = (target.get("markdown") or "") + "\n" + (anon.get("markdown") or "")
-                target["rows"] = (target.get("rows") or []) + (anon.get("rows") or [])
-            target["page"] = min(target["page"], anon["page"])
-        elif (anon.get("rows") and len(anon["rows"]) > 2):
-            primary.append(anon)                        # keep genuine unnumbered table
-    return primary
-
-
-def enrich_evidence(doc):
-    # 1. merge caption-less table bodies into captioned tables
-    doc["tables"] = _merge_table_bodies(doc["tables"])
-
-    # 2. number, type, region for figures
-    for fig in doc.get("figures", []):
-        fig["number"] = _figure_number(fig.get("caption"))
-        fig["type"] = _classify_evidence_type(fig.get("caption"))
-        pm = doc.get("page_map", {}).get(str(fig.get("page")), {})
-        fig["region"] = _estimate_figure_region(fig.get("bbox"), pm.get("blocks", []),
-                                                pm.get("columns"))
-
-    # 3. number + type + region for tables
-    for tbl in doc.get("tables", []):
-        tbl["number"] = _table_number(tbl.get("caption"))
-        tbl["type"] = "table"
-        low = (tbl.get("caption") or "").lower()
-        tbl["result_role"] = ("comparison_own_vs_baseline"
-                              if any(w in low for w in ("achieves", "state-of-the-art", "baseline", "comparison"))
-                              else "supporting_data")
-        pm = doc.get("page_map", {}).get(str(tbl.get("page")), {})
-        tbl["region"] = _estimate_table_region(tbl.get("bbox"), pm.get("blocks", []),
-                                               pm.get("columns"))
-
-    # 4. cross-references: which sections cite each figure/table. Inline numbers
-    #    are often split from the word "Figure"/"Table" in the XML layout, so use
-    #    pdftotext -layout per page (contiguous "Figure 3" / "Table 2" strings).
-    def _page_plain_text(pn, cache):
-        if pn not in cache:
-            try:
-                out = subprocess.run(["pdftotext", "-f", str(pn), "-l", str(pn),
-                                      "-layout", doc.get("_pdf_path", ""), "-"],
-                                     capture_output=True, text=True, check=False).stdout
-            except Exception:  # noqa: BLE001
-                out = ""
-            cache[pn] = out or ""
-        return cache[pn]
-
-    # page -> sections active on that page (sections that begin on the page,
-    # plus the continuing section when none begins there)
-    pages = sorted({s.get("page") or 1 for s in doc.get("sections", [])} | {1})
-    page_sections = {}
-    for pn in pages:
-        active = [s.get("heading", "") for s in doc.get("sections", [])
-                  if (s.get("page") or 1) == pn]
-        if not active:
-            prev = [s for s in doc.get("sections", []) if (s.get("page") or 1) < pn]
-            if prev:
-                active = [prev[-1].get("heading", "")]
-        page_sections[pn] = active
-
-    cache = {}
-    for label, key, pat in (("figure", "figures", r"[Ff]ig(?:ure)?\.?\s*(\d+)"),
-                            ("table", "tables", r"[Tt]able\.?\s*(\d+)")):
-        for ev in doc.get(key, []):
-            num = ev.get("number")
-            if num is None:
-                continue
-            cited_pages, cited_sections = [], []
-            for pn in pages:
-                txt = _page_plain_text(pn, cache)
-                if any(int(m.group(1)) == num for m in re.finditer(pat, txt)):
-                    cited_pages.append(pn)
-                    for h in page_sections.get(pn, []):
-                        if h not in cited_sections:
-                            cited_sections.append(h)
-            ev["cited_in"] = cited_sections
-            ev["cited_pages"] = cited_pages
-
-    # 5. per-page plain text (pdftotext -layout), for the agent to re-merge
-    #    inline-math fragments into clean claim sentences during refinement
-    doc["plaintext_pages"] = {pn: cache[pn] for pn in pages}
-    return doc
-
-
-# ---------------------------------------------------------------------------
 def main():
-    ap = argparse.ArgumentParser(description="Layout-aware scientific PDF parser")
-    ap.add_argument("input")
-    ap.add_argument("--out", help="write JSON here (default: stdout)")
-    ap.add_argument("--txt", help="write plain reading-order text here")
-    ap.add_argument("--pretty", action="store_true")
+    ap = argparse.ArgumentParser()
+    ap.add_argument("pdf", help="input PDF path")
+    ap.add_argument("--out", required=True, help="output structure.json path")
     args = ap.parse_args()
 
-    try:
-        doc = parse_pdf(args.input)
-    except Exception as exc:  # noqa: BLE001
-        doc = {"schema": "paper2arm/pdf-structure/v1", "status": "failed",
-               "error": str(exc), "document": {}, "sections": [], "tables": [],
-               "figures": [], "equations": [], "references": [],
-               "uncertainty": [], "page_map": {}}
-
-    json_text = json.dumps(doc, ensure_ascii=False, indent=2 if args.pretty else None)
-    if args.out:
-        with open(args.out, "w", encoding="utf-8") as fh:
-            fh.write(json_text + "\n")
-    else:
-        print(json_text)
-
-    if args.txt:
-        parts = []
-        if doc["document"].get("title"):
-            parts.append(doc["document"]["title"])
-        if doc["document"].get("abstract"):
-            parts.append(doc["document"]["abstract"])
-        for s in doc["sections"]:
-            parts.append(s["heading"])
-            for p in s.get("paragraphs", []):
-                parts.append(p["text"])
-        with open(args.txt, "w", encoding="utf-8") as fh:
-            fh.write("\n\n".join(parts) + "\n")
+    structure = parse(args.pdf)
+    with open(args.out, "w", encoding="utf-8") as fh:
+        json.dump(structure, fh, ensure_ascii=False, indent=2)
+    s = structure["stats"]
+    print("parsed %d pages: %d sections / %d paragraphs / %d figures / "
+          "%d tables / %d equations / %d references / %d unreadable"
+          % (s["pages"], s["sections"], s["paragraphs"], s["figures"],
+             s["tables"], s["equations"], s["references"],
+             s["unreadable_pages"]))
 
 
 if __name__ == "__main__":
