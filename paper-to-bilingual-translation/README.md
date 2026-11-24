@@ -5,8 +5,8 @@
 | 质量点 | 本 Skill 的做法 |
 |-|-|
 | 术语稳 | `extract_terms.py` 抽取候选术语 → Agent 逐条锁定译名 → `verify_translation.py` 校验全篇译名一致（术语表被"真正执行"，而非写在提示里） |
-| 段落全 | `segment.py` 生成固定的段落级翻译骨架（段号↔原文↔页码），逐段填充，不漏段/不重段/不错位 |
-| 关系准 | `verify_translation.py` 检查数字、单位、`[N]` 引用、Figure/Table/Equation 编号、否定与限定标记是否被保留 |
+| 段落全 | `segment.py` 生成固定的段落级翻译骨架（段号↔原文↔页码），段落、标题、图注、**表头与表体**都成为独立单元，不漏段/不重段/不错位 |
+| 关系准 | `verify_translation.py` 检查数字、单位、`[N]` 引用、Figure/Table/Equation 编号、否定·限定·**因果·让步**关系、**数学符号**与技术单位是否被保留 |
 | 可核验 | 每段译文带 `para_id`+`page`+`section`+`notes`（译法依据），译不准处标 `uncertain` |
 
 ## 文件
@@ -15,7 +15,7 @@
 - `parse_pdf.py` — 版面解析（段落/图注/表头 + `plaintext_pages` 干净正文）
 - `extract_terms.py` — 术语候选抽取（缩写、全称配对、高频标题短语）
 - `segment.py` — 段落级翻译骨架
-- `verify_translation.py` — 译文确定性核验 + 人工确认清单（数字/引用/图表编号/否定限定/**技术单位**/术语一致逐处定位）
+- `verify_translation.py` — 译文确定性核验 + 人工确认清单（数字/引用/图表编号/否定限定/**因果让步**/**数学符号**/技术单位/术语一致逐处定位）
 - `benchmark.py` — A/B 公平对照（裸 Agent vs 本 Skill 的段落对齐/术语表/核验项/可检出受保护 token 数）
 - `reproduce.py` — 一键复现（parse→terms→segment，`--selftest` 证明核验生效）
 

@@ -32,6 +32,21 @@ reading tasks.
   section/paragraph range to translate, and the output fields (the contract).
 - `/input/task.md` — the task brief (when provided).
 
+## Translation quality reference (术语稳 / 关系准 / 译文质量)
+
+- **Terminology**: the locked glossary is authoritative; never translate a locked
+  term differently in a caption, table header or conclusion.
+- **Referents (指代)**: resolve "it/this/these/前者/后者" so the Chinese target
+  names the referent when the source is ambiguous; if genuinely ambiguous, mark
+  `uncertain` rather than guessing.
+- **Voice & register**: render English passive with Chinese 被动 (被/受/由…所) or
+  natural active; keep the academic register — no colloquial, promotional or
+  absolute wording.
+- **Avoid translationese**: "in the process of …" → direct verb; "has the ability
+  to" → "能够"; do not mechanically keep every "of"/"with".
+- **Long sentences**: split run-on sentences at clause boundaries but preserve the
+  logical relation (causal/concessive) and the sentence order for alignment.
+
 ## Workflow (follow in order)
 
 1. **Read the case.** Record `case_id`, the PDF path, the target language, the
@@ -63,9 +78,10 @@ reading tasks.
    ```bash
    python3 /app/submission/segment.py /app/work/structure.json --out /app/work/units.json
    ```
-   Every paragraph/heading/caption becomes a unit with a fixed `para_id`, `page`
-   and `section`. Fill the skeleton in place — this guarantees no paragraph is
-   missed, duplicated or misplaced (段落全).
+   Every paragraph/heading/caption/table becomes a unit with a fixed `para_id`,
+   `page` and `section` (captions get `is_caption`, table headers+cells get
+   `is_table`). Fill the skeleton in place — this guarantees no paragraph, chart
+   caption or table header is missed, duplicated or misplaced (段落全).
 
 6. **Translate unit by unit.** For each unit in `/app/work/units.json`:
    - Use the **locked glossary** for every term occurrence; keep the term's
@@ -77,6 +93,15 @@ reading tasks.
      "Table N" / "Equation (N)" references, and negation/limitation wording
      (关系准). In Chinese, render negation with 不/非/无/未/不能/无法 and
      limitation with 仅/除非/如果/在…条件下.
+   - Keep **relations explicit** (关系准): causal links (because/therefore/thus/
+     due to → 因为/由于/因此/所以/从而/导致) and concessive links (although/
+     whereas/despite/however → 虽然/尽管/但是/然而/不过) must stay marked, not
+     dissolve into juxtaposition.
+   - Keep **formulas and math symbols** (α β θ σ ∑ ∫ √ ± × → ≈ ≤ ≥ …) exactly as
+     in the source; re-merge split inline math from `plaintext_pages`.
+   - Keep **referents** (指代) unambiguous: when the source says "it/this/前者/
+     后者", resolve or render so the target keeps the same referent; if ambiguous,
+     mark `uncertain`.
    - Put the translation in `translation`; add `notes` (译法依据, e.g. why a
      term was kept or why a sentence was restructured); set `uncertain: true`
      and add an `uncertainty_note` when a passage is genuinely ambiguous —
@@ -123,8 +148,11 @@ reading tasks.
   exactly as in the source.** Re-merge inline math from `plaintext_pages`.
 - **The glossary is executed.** The locked translation appears verbatim at every
   occurrence; verification flags any drift.
-- **Negation and limitation are marked, not softened.** 不/非/无/未 and 仅/除非/
-  如果 must appear where the source has them.
+- **Negation, limitation, causal and concessive relations are marked, not
+  softened.** 不/非/无/未, 仅/除非/如果, 因为/因此/所以/导致 and 虽然/尽管/但是/
+  然而 must appear where the source has them.
+- **Formulas and math symbols stay exactly.** α β θ σ ∑ ∫ √ ± × → ≈ ≤ ≥ … survive
+  translation; re-merge split inline math.
 - **Honest uncertainty.** Image-only equations, OCR'd scans, ambiguous pronouns
   and mixed-language passages go into `uncertainty`, not into a confident
   translation. A partial translation states its limits.
@@ -134,9 +162,10 @@ reading tasks.
 ## Self-check
 
 Before finishing: (1) every unit has a `translation` (or an explicit skip reason);
-(2) `verification.json` shows no unexplained missing numbers/citations/negation;
-(3) every locked glossary term is consistent; (4) `result.json` contains every
-contract field and case_id; (5) each uncertain passage is marked.
+(2) `verification.json` shows no unexplained missing numbers/citations/negation/
+causal/concessive/math; (3) every locked glossary term is consistent; (4)
+`result.json` contains every contract field and case_id; (5) each uncertain
+passage is marked.
 
 ## Resource limits
 

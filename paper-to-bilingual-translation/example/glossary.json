@@ -1,0 +1,37 @@
+{
+  "schema": "paper2arm/glossary/v1",
+  "note": "SYNTHETIC EXAMPLE — 术语候选与译名为示意，非正式案例答案",
+  "terms": [
+    {
+      "term": "BLEU",
+      "kind": "acronym",
+      "translation": "BLEU(保留)",
+      "occurrences": 14
+    },
+    {
+      "term": "WMT",
+      "kind": "acronym",
+      "translation": "WMT(保留)",
+      "occurrences": 10
+    },
+    {
+      "term": "EOS",
+      "kind": "acronym",
+      "translation": "EOS(保留)",
+      "occurrences": 10
+    },
+    {
+      "term": "WSJ",
+      "kind": "acronym",
+      "full_form": "Wall Street Journal",
+      "translation": "WSJ(保留)",
+      "occurrences": 9
+    },
+    {
+      "term": "ACL",
+      "kind": "acronym",
+      "translation": "ACL(保留)",
+      "occurrences": 6
+    }
+  ]
+}

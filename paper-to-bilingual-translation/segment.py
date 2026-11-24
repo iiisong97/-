@@ -91,14 +91,21 @@ def main():
     # captions (figure/table) as units — chart titles must be translated too
     for kind in ("figures", "tables"):
         for it in doc.get(kind, []):
+            secname = f"{kind[:-1].title()} {it.get('number') or ''}".strip()
             cap = it.get("caption")
-            if not cap:
-                continue
-            pid += 1
-            units.append({"para_id": pid, "page": it.get("page"),
-                          "section": f"{kind[:-1].title()} {it.get('number') or ''}".strip(),
-                          "source": cap, "translation": "", "notes": "",
-                          "uncertain": False, "is_caption": True})
+            if cap:
+                pid += 1
+                units.append({"para_id": pid, "page": it.get("page"),
+                              "section": secname, "source": cap, "translation": "",
+                              "notes": "", "uncertain": False, "is_caption": True})
+            # table headers and cells (表头/表体) are also content: the scoring's
+            # "图表题注与表头" requires them to be translated, not just the caption.
+            md = (it.get("markdown") or "").strip()
+            if kind == "tables" and md:
+                pid += 1
+                units.append({"para_id": pid, "page": it.get("page"),
+                              "section": secname, "source": md, "translation": "",
+                              "notes": "", "uncertain": False, "is_table": True})
 
     out = {"schema": "paper2arm/translation-units/v1",
            "note": "Fill 'translation' for each unit. Keep para_id/page/section fixed "

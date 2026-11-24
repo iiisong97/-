@@ -3,8 +3,9 @@
 
 Same paper, same tools. The base agent just dumps the raw page text with no
 alignment, no glossary and no deterministic check; the Skill adds a fixed
-paragraph-level alignment, a glossary, and six deterministic verification checks
-(numbers / citations / figure-refs / negation / limitation / term-consistency).
+paragraph-level alignment, a glossary, and ten deterministic verification checks
+(numbers / citations / figure-refs / negation / limitation / causal / concessive /
+math / kept-units / term-consistency).
 The counts are computed from the same parsed structure, so the gain is an
 observable run result, not a self-claim.
 
@@ -23,9 +24,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import parse_pdf as P  # noqa: E402
 
-# the seven deterministic checks verify_translation.py performs
+# the ten deterministic checks verify_translation.py performs
 VERIFY_CHECKS = ["numbers", "citations", "figure_refs", "negation",
-                 "limitation", "kept_units", "term_consistency"]
+                 "limitation", "causal", "concessive", "math",
+                 "kept_units", "term_consistency"]
 
 
 def _count_protected(structure):
@@ -105,7 +107,7 @@ def main():
                 skill["protected_tokens_detectable"] - base["protected_tokens_detectable"],
         },
         "note": "Same paper, same tools. The Skill adds a paragraph-level "
-                "alignment, a glossary and six deterministic verification checks; "
+                "alignment, a glossary and ten deterministic verification checks; "
                 "counts are run results. Reproduce with "
                 "'python3 benchmark.py <paper.pdf> --out DIR'.",
     }

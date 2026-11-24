@@ -20,6 +20,27 @@ ACRONYM_RE = re.compile(r"\b[A-Z]{2,6}\b")
 DEF_PAIR_RE = re.compile(
     r"\b([A-Z][a-zA-Z]+(?:[ -][A-Z][a-zA-Z]+){1,6})\s*\(([A-Z]{2,6})\)")
 TITLE_PHRASE_RE = re.compile(r"\b[A-Z][a-zA-Z]+(?:[ -][A-Z][a-zA-Z]+){2,5}\b")
+LOWERCASE_TERM_RE = re.compile(r"\b[a-z][a-z-]{3,}\b")
+
+# Common English function/general words to exclude from lowercase term mining.
+LOWERCASE_STOP = {
+    "the", "and", "for", "with", "that", "this", "these", "those", "from",
+    "into", "over", "under", "while", "where", "which", "their", "have",
+    "been", "also", "using", "used", "more", "less", "than", "each", "both",
+    "such", "only", "even", "when", "after", "before", "between", "through",
+    "without", "within", "during", "against", "among", "based", "shown",
+    "given", "paper", "work", "model", "models", "data", "results", "result",
+    "method", "methods", "experiment", "experiments", "study", "studies",
+    "figure", "table", "section", "approach", "propose", "proposed", "novel",
+    "previous", "recent", "existing", "different", "several", "many", "one",
+    "two", "three", "first", "second", "third", "state", "states", "using",
+    "does", "make", "makes", "show", "shows", "provide", "provides",
+    "improve", "improves", "improved", "achieve", "achieves", "achieved",
+    "obtain", "obtains", "obtained", "number", "numbers", "large", "small",
+    "high", "low", "higher", "lower", "well", "new", "key", "set", "sets",
+    "time", "times", "level", "levels", "value", "values", "terms", "term",
+    "case", "cases", "order", "orders", "form", "forms", "way", "ways",
+}
 
 # Common non-domain terms to skip (English function/capitalized general words)
 STOP = {
@@ -85,6 +106,17 @@ def main():
         if c >= 3:
             key = p.lower()
             terms.setdefault(p, {"term": p, "kind": "phrase", "count": c})
+
+    # 4. repeated lowercase technical terms (>= 6 occurrences) — catches domain
+    # nouns like "attention", "regularization", "encoder" that acronym/Title-Case
+    # mining misses; these need a locked translation too (术语稳).
+    lower_counts = Counter(
+        w for w in LOWERCASE_TERM_RE.findall(text)
+        if w not in LOWERCASE_STOP and len(w) >= 4)
+    for w, c in lower_counts.items():
+        if c >= 6:
+            key = "lower:" + w
+            terms.setdefault(key, {"term": w, "kind": "lowercase", "count": c})
 
     # keep acronyms with >=2 occurrences and phrases with >=3; drop rare noise
     candidates = []

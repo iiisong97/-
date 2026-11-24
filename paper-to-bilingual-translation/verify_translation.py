@@ -27,6 +27,23 @@ LIMIT_EN = {"only", "unless", "provided", "assuming", "limited", "restricted"}
 LIMIT_ZH = {"仅", "只有", "除非", "如果", "当", "前提", "在……下", "限于",
             "假设", "给定", "限于", "条件"}
 
+# Causal (因果) and concessive (让步) relation markers — the task's 关系准 requires
+# these to survive translation, alongside negation and limitation.
+CAUSAL_EN = {"because", "therefore", "thus", "hence", "consequently", "thereby",
+             "due to", "as a result", "owing to", "leads to", "lead to",
+             "causes", "caused by", "results in", "resulting in", "yields"}
+CAUSAL_ZH = {"因为", "由于", "因此", "所以", "从而", "导致", "使得", "引起",
+             "由此", "因而", "致使", "之所以", "以致", "结果"}
+CONC_EN = {"although", "though", "whereas", "despite", "nevertheless",
+           "nonetheless", "even though", "however", "albeit"}
+CONC_ZH = {"虽然", "尽管", "但是", "然而", "不过", "即使", "即便", "却",
+           "可是", "相反", "反而"}
+
+# Math symbols that must survive translation (formulas are facts, not prose).
+MATH_SYMBOLS = ["α", "β", "γ", "δ", "ε", "θ", "λ", "μ", "π", "σ", "φ", "ψ",
+                "ω", "∑", "∏", "√", "∫", "∂", "∇", "±", "×", "·", "→", "↔",
+                "≈", "≤", "≥", "≠", "∞", "∥", "∈", "⊂", "⊆", "⊕", "⊗"]
+
 # Technical tokens that Chinese scientific writing conventionally KEEPS in Latin
 # script; if present in the source they must survive (or be flagged for review).
 KEPT_UNITS = ["nm", "µm", "μm", "mm", "cm", "km", "Hz", "kHz", "MHz", "GHz",
@@ -49,8 +66,17 @@ def _protected_items(source):
     figs = FIGTAB_RE.findall(source)
     neg = [w for w in re.findall(r"[A-Za-z']+", source) if w.lower() in NEG_EN]
     limit = [w for w in re.findall(r"[A-Za-z']+", source) if w.lower() in LIMIT_EN]
+    low = source.lower()
+    causal = [m for m in CAUSAL_EN if re.search(r"\b" + re.escape(m) + r"\b", low)]
+    conc = [m for m in CONC_EN if re.search(r"\b" + re.escape(m) + r"\b", low)]
+    math = [s for s in MATH_SYMBOLS if s in source]
     return {"numbers": nums, "citations": cits, "fig_refs": figs,
-            "negation": neg, "limitation": limit}
+            "negation": neg, "limitation": limit,
+            "causal": causal, "concessive": conc, "math": math}
+
+
+def _has_any_zh(translation, markers):
+    return any(m in translation for m in markers)
 
 
 def _has_negation_zh(translation):
@@ -77,6 +103,8 @@ def main():
     per_unit = []
     missing_numbers, missing_citations, missing_figs = [], [], []
     missing_negation, missing_limitation, missing_units = [], [], []
+    missing_causal, missing_concessive, missing_math = [], [], []
+    missing_omission = []
 
     for u in units:
         src = u.get("source", "")
@@ -110,6 +138,25 @@ def main():
             issues.append(f"limitation marker not marked ({prot['limitation']})")
             missing_limitation.append({"para_id": u.get("para_id"),
                                        "limitation": prot["limitation"]})
+        if prot["causal"] and not _has_any_zh(trans, CAUSAL_ZH):
+            issues.append(f"causal relation not marked ({prot['causal']})")
+            missing_causal.append({"para_id": u.get("para_id"),
+                                   "causal": prot["causal"]})
+        if prot["concessive"] and not _has_any_zh(trans, CONC_ZH):
+            issues.append(f"concessive relation not marked ({prot['concessive']})")
+            missing_concessive.append({"para_id": u.get("para_id"),
+                                       "concessive": prot["concessive"]})
+        for s in prot["math"]:
+            if s not in trans:
+                issues.append(f"math symbol {s} dropped")
+                missing_math.append({"para_id": u.get("para_id"), "symbol": s})
+        # gross omission (段落全): a paragraph reduced to a fragment. Conservative
+        # threshold — Chinese is naturally shorter than English, so only flag
+        # when the translation is <30% of a long source.
+        if len(src) >= 100 and len(trans) < 0.3 * len(src):
+            issues.append(f"possible omission ({len(trans)}/{len(src)} chars)")
+            missing_omission.append({"para_id": u.get("para_id"),
+                                     "src_len": len(src), "trans_len": len(trans)})
         for tk in _kept_tokens(src):
             if tk not in trans:
                 issues.append(f"technical token {tk} dropped")
@@ -152,6 +199,10 @@ def main():
             "fig_refs_missing": missing_figs,
             "negation_missing": missing_negation,
             "limitation_missing": missing_limitation,
+            "causal_missing": missing_causal,
+            "concessive_missing": missing_concessive,
+            "math_missing": missing_math,
+            "omission_suspected": missing_omission,
             "kept_units_missing": missing_units,
         },
         "term_consistency": term_report,
@@ -165,6 +216,10 @@ def main():
             "citations_missing": len(missing_citations),
             "fig_refs_missing": len(missing_figs),
             "negation_missing": len(missing_negation),
+            "causal_missing": len(missing_causal),
+            "concessive_missing": len(missing_concessive),
+            "math_missing": len(missing_math),
+            "omission_suspected": len(missing_omission),
             "kept_units_missing": len(missing_units),
             "terms_inconsistent": sum(1 for t in term_report if not t["consistent"]),
         },

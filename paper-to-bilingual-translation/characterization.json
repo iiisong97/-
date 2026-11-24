@@ -1,0 +1,25 @@
+{
+  "schema": "paper2arm/skill-characterization/v1",
+  "challenge_id": "product-arena-01-5a9928c1",
+  "topic": "文献翻译",
+  "summary": "paper-to-bilingual-translation Skill：确定性证据流水线把真实科研论文翻译成可核验的双语对照结果。先抽取领域术语表并全篇锁定译名，再在固定段落骨架（段号↔原文↔页码）上逐段翻译，最后用确定性脚本核验数字/单位/公式/文献编号/图表引用/否定与限定是否保留、术语译名是否一致，输出段落级对齐+证据定位+人工确认清单。",
+  "direction": "聚焦『双语对照』+『译文核验』+『术语一致性』，形成可运行、可复现、可独立验证的最小成果",
+  "methods": {
+    "parse": "parse_pdf.py 版面解析出段落/图注/表头 + plaintext_pages（inline 数字完整），作为翻译与核验的证据层",
+    "glossary": "extract_terms.py 确定性抽取缩写、缩写-全称配对、高频标题短语、高频小写术语(attention/regularization 等)，Agent 逐条锁定译名后由核验脚本强制执行",
+    "alignment": "segment.py 生成固定翻译骨架（每段一个 para_id+page+section+source），译文逐段填充，段落级对齐是结构保证而非事后记忆",
+    "verify": "verify_translation.py 检查数字/单位/[N]引用/Figure·Table·Equation编号/否定·限定标记/因果·让步关系(because·therefore·although·however→因为·因此·虽然·然而)/数学符号(α β θ σ ∑ ∫ √ ± × → ≈ ≤ ≥)/技术单位(nm·Hz·GB·BLEU·GPU)是否保留，术语译名是否全篇一致并逐处定位 para_ids，长段落严重漏译(<30%长度)标记为 omission，输出 needs_human_review 清单",
+    "benchmark": "benchmark.py A/B 公平对照：同一论文下裸 Agent(无对齐/无术语表/无核验) vs 本 Skill(段落对齐+术语表+10项核验+受保护token可检出数)，增益为可运行结果而非自述",
+    "exception": "扫描件/图片公式/图片表格→OCR(ocr-tool)并在 uncertainty 声明；文字层缺失/原文残缺/语言混杂→标记 uncertain 不臆造"
+  },
+  "quality_points": {
+    "术语稳": "术语表锁定后由 verify 强制执行并核验全篇一致",
+    "段落全": "segment 固定骨架保证不漏段/不重段/不错位，段号与原文一一对应",
+    "关系准": "verify 检查数字单位/公式/引用编号/图表编号/否定·限定·因果·让步·数学符号保留",
+    "可核验": "每段带 para_id+page+notes(译法依据)，译不准处标 uncertain"
+  },
+  "dependencies": ["python3 stdlib", "poppler-utils (pdftotext/pdftohtml，即赛题 pdf-text-tool)"],
+  "resources": ["SKILL.md", "parse_pdf.py", "extract_terms.py", "segment.py",
+                "verify_translation.py", "benchmark.py", "reproduce.py", "run.sh",
+                "README.md", "requirements.txt", "example/*.json"]
+}

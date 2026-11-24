@@ -1,0 +1,29 @@
+{
+  "schema": "paper2arm/translation-benchmark/v1",
+  "input": {
+    "paper": "attention.pdf"
+  },
+  "baseline_naive": {
+    "mode": "base agent (no skill)",
+    "aligned_units": 0,
+    "glossary_terms": 0,
+    "verification_checks": 0,
+    "protected_tokens_detectable": 0,
+    "raw_pages": 11
+  },
+  "skill_pipeline": {
+    "mode": "with skill (paper2arm)",
+    "aligned_units": 265,
+    "glossary_terms": 23,
+    "verification_checks": 7,
+    "protected_tokens_detectable": 552,
+    "seconds": 0.2
+  },
+  "gain": {
+    "aligned_units": 265,
+    "glossary_terms": 23,
+    "verification_checks": 7,
+    "protected_tokens_detectable": 552
+  },
+  "note": "Same paper, same tools. The Skill adds a paragraph-level alignment, a glossary and six deterministic verification checks; counts are run results. Reproduce with 'python3 benchmark.py <paper.pdf> --out DIR'."
+}

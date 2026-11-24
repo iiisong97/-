@@ -1,0 +1,108 @@
+{
+  "schema": "paper2arm/translation-verify/v1",
+  "protected": {
+    "numbers_missing": [],
+    "citations_missing": [],
+    "fig_refs_missing": [],
+    "negation_missing": [],
+    "limitation_missing": [
+      {
+        "para_id": 2,
+        "limitation": [
+          "limited"
+        ]
+      }
+    ],
+    "causal_missing": [],
+    "concessive_missing": [],
+    "math_missing": [],
+    "kept_units_missing": [
+      {
+        "para_id": 2,
+        "token": "BLEU"
+      }
+    ]
+  },
+  "term_consistency": [
+    {
+      "term": "BLEU",
+      "translation": "BLEU(保留)",
+      "occurrences": 1,
+      "para_ids": [
+        2
+      ],
+      "consistent": false,
+      "variants_found": [
+        "（示例译文）28.4 2014 2 2014 41.8 3.5 2 2 31 2017 ：本段为示意"
+      ]
+    },
+    {
+      "term": "WMT",
+      "translation": "WMT(保留)",
+      "occurrences": 1,
+      "para_ids": [
+        2
+      ],
+      "consistent": false,
+      "variants_found": [
+        "（示例译文）28.4 2014 2 2014 41.8 3.5 2 2 31 2017 ：本段为示意"
+      ]
+    }
+  ],
+  "per_unit_issues": [
+    {
+      "para_id": 2,
+      "issues": [
+        "limitation marker not marked (['limited'])",
+        "technical token BLEU dropped"
+      ]
+    }
+  ],
+  "needs_human_review": [
+    {
+      "type": "term_inconsistent",
+      "detail": {
+        "term": "BLEU",
+        "translation": "BLEU(保留)",
+        "occurrences": 1,
+        "para_ids": [
+          2
+        ],
+        "consistent": false,
+        "variants_found": [
+          "（示例译文）28.4 2014 2 2014 41.8 3.5 2 2 31 2017 ：本段为示意"
+        ]
+      }
+    },
+    {
+      "type": "term_inconsistent",
+      "detail": {
+        "term": "WMT",
+        "translation": "WMT(保留)",
+        "occurrences": 1,
+        "para_ids": [
+          2
+        ],
+        "consistent": false,
+        "variants_found": [
+          "（示例译文）28.4 2014 2 2014 41.8 3.5 2 2 31 2017 ：本段为示意"
+        ]
+      }
+    }
+  ],
+  "summary": {
+    "units_total": 4,
+    "units_translated": 4,
+    "units_with_issues": 1,
+    "numbers_missing": 0,
+    "citations_missing": 0,
+    "fig_refs_missing": 0,
+    "negation_missing": 0,
+    "causal_missing": 0,
+    "concessive_missing": 0,
+    "math_missing": 0,
+    "kept_units_missing": 1,
+    "terms_inconsistent": 2
+  },
+  "note": "合成示例（synthetic example），用于说明校验输出结构；非正式案例答案。"
+}
